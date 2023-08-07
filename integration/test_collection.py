@@ -7,6 +7,7 @@ from weaviate.collection.classes import (
     CollectionConfig,
     Property,
     DataType,
+    IterateOptions,
     Vectorizer,
     ReferenceProperty,
     RefToObject,
@@ -445,3 +446,23 @@ def test_empty_search_returns_everything(client: weaviate.Client):
     assert objects[0].metadata.score is not None
     assert objects[0].metadata.last_update_time_unix is not None
     assert objects[0].metadata.creation_time_unix is not None
+
+
+def test_iterate(client: weaviate.Client):
+    client.collection.delete("TestIterate")
+    collection = client.collection.create(
+        CollectionConfig(
+            name="TestIterate",
+            vectorizer=Vectorizer.NONE,
+            properties=[Property(name="name", dataType=DataType.TEXT)],
+        )
+    )
+
+    collection.data.insert(data={"name": "word"}, vector=[1])
+    collection.data.insert(data={"name": "other"})
+
+    results = collection._iterate(IterateOptions(limit=2))
+    assert len(results) == 2
+
+    results = collection._iterate(IterateOptions(limit=1))
+    assert len(results) == 1

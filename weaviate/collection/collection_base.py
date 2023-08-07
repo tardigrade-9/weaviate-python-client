@@ -8,6 +8,9 @@ from weaviate.collection.classes import (
     CollectionConfigBase,
     Error,
     Errors,
+    IterateOptions,
+    _IterateReturn,
+    iterate_return_from_response,
     MetadataGet,
     Tenant,
     UUID,
@@ -224,6 +227,12 @@ class CollectionObjectBase:
         if response.status_code == 204:
             return
         raise UnexpectedStatusCodeException("Update object", response)
+
+    def _iterate(self, options: IterateOptions) -> List[_IterateReturn]:
+        qs = options.to_querystring()
+        path = f"/objects?class={self.name}&{qs}"
+        response = self._connection.get(path=path, params=self.__apply_context({}))
+        return iterate_return_from_response(response.json())
 
     def _get_by_id(
         self, uuid: UUID, metadata: Optional[MetadataGet] = None

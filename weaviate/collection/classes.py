@@ -7,6 +7,7 @@ from typing import (
     Any,
     Optional,
     List,
+    Literal,
     Set,
     TypeVar,
     Type,
@@ -222,8 +223,8 @@ class MetadataGet(BaseModel):
     distance: bool = False
     certainty: bool = False
     score: bool = False
-    explain_score: bool = Field(alias="explainScore", default=False)
-    is_consistent: bool = Field(alias="isConsistent", default=False)
+    explainScore: bool = Field(alias="explain_score", default=False)
+    isConsistent: bool = Field(alias="is_consistent", default=False)
 
     def _get_fields(self) -> Set[str]:
         additional_props: Set[str] = set()
@@ -243,6 +244,69 @@ class MetadataGet(BaseModel):
 
     def to_rest(self) -> str:
         return ",".join(self._get_fields())
+
+
+class IterateOptions(BaseModel):
+    after: Optional[str] = None
+    include: Optional[Union[str, Literal["classifiction", "featureProjection", "vector"]]] = None
+    limit: int = 25
+    offset: Optional[int] = None
+    order: Optional[Literal["asc", "desc"]] = None
+    sort: Optional[List[str]] = None
+
+    @field_validator("after")
+    def after_xor_offset_and_sort(cls, v, values):
+        if v is not None and values["offset"] is not None:
+            raise ValueError("after and offset are mutually exclusive")
+        if v is not None and values["sort"] is not None:
+            raise ValueError("after and sort are mutually exclusive")
+        return v
+
+    @field_validator("offset")
+    def offset_xor_after(cls, v, values):
+        if v is not None and values["after"] is not None:
+            raise ValueError("after and offset are mutually exclusive")
+        return v
+
+    @field_validator("limit")
+    def limit_must_be_positive(cls, v):
+        if v is not None and v < 1:
+            raise ValueError("limit must be positive")
+        return v
+
+    def to_querystring(self) -> str:
+        query_args: List[str] = []
+        for cls_field in self.model_fields:
+            val = getattr(self, cls_field)
+            if val is not None:
+                query_args.append(f"{cls_field}={val}")
+        return "&".join(query_args)
+
+
+@dataclass
+class _IterateReturn:
+    class_name: str
+    creation_time_unix: int
+    uuid: uuid_package.UUID
+    last_update_time_unix: int
+    properties: Dict[str, Any]
+    vector: Optional[List[float]]
+    vector_weights: Optional[List[float]]
+
+
+def iterate_return_from_response(response: Dict[str, Any]) -> List[_IterateReturn]:
+    return [
+        _IterateReturn(
+            class_name=cls["class"],
+            creation_time_unix=cls["creationTimeUnix"],
+            uuid=uuid_package.UUID(cls["id"]),
+            last_update_time_unix=cls["lastUpdateTimeUnix"],
+            properties=cls["properties"],
+            vector=cls.get("vector"),
+            vector_weights=cls["vectorWeights"],
+        )
+        for cls in response.get("objects", [])
+    ]
 
 
 @dataclass
