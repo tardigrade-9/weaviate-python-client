@@ -101,3 +101,6 @@ class _Tenants:
 
         tenant_resp: List[Dict[str, Any]] = response.json()
         return [Tenant(**tenant) for tenant in tenant_resp]
+
+    def update_activation(self, tenants: List[Tenant]):
+        pass
