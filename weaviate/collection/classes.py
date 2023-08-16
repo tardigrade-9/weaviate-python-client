@@ -942,5 +942,11 @@ class CollectionModelConfig(CollectionConfigCreateBase, Generic[Model]):
         return ret_dict
 
 
+class TenantActivityStatus(str, Enum):
+    HOT = "HOT"
+    COLD = "COLD"
+
+
 class Tenant(BaseModel):
     name: str
+    activity_status: TenantActivityStatus
