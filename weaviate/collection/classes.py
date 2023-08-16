@@ -949,4 +949,4 @@ class TenantActivityStatus(str, Enum):
 
 class Tenant(BaseModel):
     name: str
-    activity_status: TenantActivityStatus
+    activity_status: TenantActivityStatus = TenantActivityStatus.HOT
