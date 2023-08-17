@@ -950,3 +950,9 @@ class TenantActivityStatus(str, Enum):
 class Tenant(BaseModel):
     name: str
     activity_status: TenantActivityStatus = TenantActivityStatus.HOT
+
+    def _to_weaviate_object(self) -> Dict[str, str]:
+        return {
+            "name": self.name,
+            "activityStatus": self.activity_status.value,
+        }

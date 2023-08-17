@@ -24,6 +24,7 @@ from weaviate.collection.classes import (
     MultiTenancyConfig,
     StopwordsPreset,
     Tenant,
+    TenantActivityStatus,
     VectorIndexConfigUpdate,
     Vectorizer,
 )
@@ -618,6 +619,16 @@ def test_tenants(client: weaviate.Client):
     assert len(tenants) == 1
     assert type(tenants[0]) is Tenant
     assert tenants[0].name == "tenant1"
+    assert tenants[0].activity_status == TenantActivityStatus.HOT
+
+    collection.tenants.update_activations(
+        [Tenant(name="tenant1", activity_status=TenantActivityStatus.COLD)]
+    )
+    tenants = collection.tenants.get()
+    assert len(tenants) == 1
+    assert type(tenants[0]) is Tenant
+    assert tenants[0].name == "tenant1"
+    assert tenants[0].activity_status == TenantActivityStatus.COLD
 
     collection.tenants.remove(["tenant1"])
 

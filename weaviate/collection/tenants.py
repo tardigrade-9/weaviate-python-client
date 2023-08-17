@@ -34,7 +34,7 @@ class _Tenants:
             - If Weaviate reports a non-OK status.
         """
 
-        loaded_tenants = [{"name": tenant.name} for tenant in tenants]
+        loaded_tenants = [tenant._to_weaviate_object() for tenant in tenants]
 
         path = "/schema/" + self.__name + "/tenants"
         try:
@@ -102,5 +102,30 @@ class _Tenants:
         tenant_resp: List[Dict[str, Any]] = response.json()
         return [Tenant(**tenant) for tenant in tenant_resp]
 
-    def update_activation(self, tenants: List[Tenant]):
-        pass
+    def update_activations(self, tenants: List[Tenant]) -> None:
+        """Update the activity status of the specified tenants in a collection in Weaviate.
+
+        This method allows you to switch tenants off and on by name. Only those tenants provided
+        as arguments will be updated. All other tenants will remain unchanged.
+
+        The collection must have been created with multi-tenancy enabled.
+
+        Raises:
+        - `requests.ConnectionError`
+            - If the network connection to Weaviate fails.
+        - `weaviate.UnexpectedStatusCodeException`
+            - If Weaviate reports a non-OK status.
+        """
+        path = "/schema/" + self.__name + "/tenants"
+        loaded_tenants = [tenant._to_weaviate_object() for tenant in tenants]
+        print(loaded_tenants)
+        try:
+            response = self.__connection.put(path=path, weaviate_object=loaded_tenants)
+        except RequestsConnectionError as conn_err:
+            raise RequestsConnectionError(
+                f"Could not update collection tenant activations for {self.__name}"
+            ) from conn_err
+        if response.status_code != 200:
+            raise UnexpectedStatusCodeException(
+                f"Update collection tenant activations for {self.__name}", response
+            )
