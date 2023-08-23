@@ -1,22 +1,23 @@
-from typing import Optional
+from typing import Generic, Optional, Type
 
-from weaviate.collection.classes import CollectionConfig
+from weaviate.collection.classes import CollectionConfig, Properties
 from weaviate.collection.collection_base import CollectionBase
 from weaviate.collection.config import _ConfigCollection
 from weaviate.collection.data import _DataCollection
-from weaviate.collection.grpc import _GrpcCollection, _RawObject
+from weaviate.collection.grpc import _GrpcCollection
 from weaviate.collection.tenants import _Tenants
 from weaviate.connect import Connection
 from weaviate.data.replication import ConsistencyLevel
 from weaviate.util import _capitalize_first_letter
 
 
-class CollectionObject:
+class CollectionObject(Generic[Properties]):
     def __init__(
         self,
         connection: Connection,
         name: str,
         config: _ConfigCollection,
+        type_: Properties,
         consistency_level: Optional[ConsistencyLevel] = None,
         tenant: Optional[str] = None,
     ) -> None:
@@ -24,8 +25,10 @@ class CollectionObject:
         self.name = name
 
         self.config = config
-        self.data = _DataCollection(connection, name, config, consistency_level, tenant)
-        self.query = _GrpcCollection[_RawObject](connection, name, tenant)
+        self.data = _DataCollection[Properties](
+            connection, name, config, type_, consistency_level, tenant
+        )
+        self.query = _GrpcCollection[Properties](connection, name, type_, tenant)
         self.tenants = _Tenants(connection, name)
 
         self.__tenant = tenant
@@ -53,9 +56,9 @@ class Collection(CollectionBase):
             )
         return self.get(name)
 
-    def get(self, name: str) -> CollectionObject:
+    def get(self, name: str, type_: Type[Properties] = dict) -> CollectionObject:
         config = _ConfigCollection(self._connection, name)
-        return CollectionObject(self._connection, name, config)
+        return CollectionObject[Properties](self._connection, name, config)
 
     def delete(self, name: str) -> None:
         """Use this method to delete a collection from the Weaviate instance by its name.

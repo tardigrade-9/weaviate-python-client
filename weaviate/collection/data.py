@@ -16,10 +16,11 @@ from weaviate.collection.classes import (
     _Object,
     UUID,
     Model,
+    Properties,
     ReferenceToMultiTarget,
     _BatchReturn,
 )
-from weaviate.collection.config import _ConfigBase, _ConfigCollectionModel
+from weaviate.collection.config import _ConfigBase, _ConfigCollection, _ConfigCollectionModel
 from weaviate.collection.grpc_batch import _BatchGRPC
 from weaviate.connect import Connection
 from weaviate.data.replication import ConsistencyLevel
@@ -290,10 +291,26 @@ class _Data:
         )
 
 
-class _DataCollection(_Data):
-    def _json_to_object(self, obj: Dict[str, Any]) -> _Object:
+class _DataCollection(Generic[Properties], _Data):
+    def __init__(
+        self,
+        connection: Connection,
+        name: str,
+        config: _ConfigCollection,
+        type_: Type[Properties],
+        consistency_level: Optional[ConsistencyLevel],
+        tenant: Optional[str],
+    ):
+        super().__init__(connection, name, config, consistency_level, tenant)
+        self.__type = type_
+
+    def _json_to_object(self, obj: Dict[str, Any]) -> _Object[Properties]:
+        if isinstance(self.__type, dict):
+            data = obj["properties"]
+        else:
+            data = self.__type.from_json(obj["properties"])
         return _Object(
-            data={prop: val for prop, val in obj["properties"].items()},
+            data=data,
             metadata=_metadata_from_dict(obj),
         )
 

@@ -11,6 +11,7 @@ from typing import (
     TypeVar,
     Type,
     Generic,
+    Protocol,
     get_args,
     get_origin,
     get_type_hints,
@@ -704,7 +705,16 @@ class _MetadataReturn:
     is_consistent: Optional[bool] = None
 
 
-Properties = TypeVar("Properties")
+class SupportsSerialization(Protocol):
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> "Properties":
+        ...
+
+    def to_json(self) -> Dict[str, Any]:
+        ...
+
+
+Properties = TypeVar("Properties", dict, SupportsSerialization)
 
 
 @dataclass
