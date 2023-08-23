@@ -19,8 +19,9 @@ from weaviate.collection.classes import (
     Properties,
     ReferenceToMultiTarget,
     _BatchReturn,
+    SupportsSerialization,
 )
-from weaviate.collection.config import _ConfigBase, _ConfigCollection, _ConfigCollectionModel
+from weaviate.collection.config import _ConfigBase, _ConfigCollectionModel
 from weaviate.collection.grpc_batch import _BatchGRPC
 from weaviate.connect import Connection
 from weaviate.data.replication import ConsistencyLevel
@@ -291,26 +292,15 @@ class _Data:
         )
 
 
-class _DataCollection(Generic[Properties], _Data):
-    def __init__(
-        self,
-        connection: Connection,
-        name: str,
-        config: _ConfigCollection,
-        type_: Type[Properties],
-        consistency_level: Optional[ConsistencyLevel],
-        tenant: Optional[str],
-    ):
-        super().__init__(connection, name, config, consistency_level, tenant)
-        self.__type = type_
-
-    def _json_to_object(self, obj: Dict[str, Any]) -> _Object[Properties]:
-        if isinstance(self.__type, dict):
+class _DataCollection(_Data):
+    def _json_to_object(self, obj: Dict[str, Any], type_: Type[Properties]) -> _Object[Properties]:
+        if type_ == Dict[str, Any]:
             data = obj["properties"]
         else:
-            data = self.__type.from_json(obj["properties"])
+            _type = cast(SupportsSerialization, type_)  # cast because of mypy limitation
+            data = _type.from_json(obj["properties"])
         return _Object(
-            data=data,
+            data=cast(Properties, data),
             metadata=_metadata_from_dict(obj),
         )
 
@@ -359,19 +349,27 @@ class _DataCollection(Generic[Properties], _Data):
         self._update(weaviate_obj, uuid=uuid)
 
     def get_by_id(
-        self, uuid: UUID, includes: Optional[GetObjectByIdIncludes] = None
-    ) -> Optional[_Object]:
+        self,
+        uuid: UUID,
+        includes: Optional[GetObjectByIdIncludes] = None,
+        type_: Optional[Type[Properties]] = Dict[str, Any],
+    ) -> Optional[_Object[Properties]]:
         ret = self._get_by_id(uuid=uuid, includes=includes)
         if ret is None:
             return ret
-        return self._json_to_object(ret)
+        _type = cast(Type[Properties], type_)  # cast because of mypy limitation
+        return self._json_to_object(ret, _type)
 
-    def get(self, includes: Optional[GetObjectsIncludes] = None) -> List[_Object]:
+    def get(
+        self,
+        includes: Optional[GetObjectsIncludes] = None,
+        type_: Optional[Type[Properties]] = Dict[str, Any],
+    ) -> List[_Object[Properties]]:
         ret = self._get(includes=includes)
         if ret is None:
             return []
-
-        return [self._json_to_object(obj) for obj in ret["objects"]]
+        _type = cast(Type[Properties], type_)  # cast because of mypy limitation
+        return [self._json_to_object(obj, _type) for obj in ret["objects"]]
 
     def reference_add(self, from_uuid: UUID, from_property: str, ref: ReferenceTo) -> None:
         self._reference_add(

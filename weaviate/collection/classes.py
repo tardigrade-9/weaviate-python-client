@@ -707,20 +707,59 @@ class _MetadataReturn:
 
 class SupportsSerialization(Protocol):
     @classmethod
-    def from_json(cls, data: Dict[str, Any]) -> "Properties":
+    def from_json(cls, data: Dict[str, Any]) -> "SupportsSerialization":
         ...
-
-    def to_json(self) -> Dict[str, Any]:
-        ...
-
-
-Properties = TypeVar("Properties", dict, SupportsSerialization)
 
 
 @dataclass
-class _Object(Generic[Properties]):
-    data: Properties
+class CollectionProperties:
+    # __dataclass_fields__: ClassVar[dict] # https://github.com/python/mypy/issues/6568#issuecomment-1324196557
+
+    @classmethod
+    def from_json(cls: "T", data: Dict[str, Any]) -> "T":
+        return cls(**data)
+
+
+T = TypeVar("T", bound=CollectionProperties)
+
+Properties = TypeVar("Properties", bound=Union[Dict[str, Any], CollectionProperties])
+To = TypeVar("To", bound=Union[Dict[str, Any], CollectionProperties])
+
+Data = TypeVar("Data")
+
+
+@dataclass
+class _Object(Generic[Data]):
+    data: Data
     metadata: _MetadataReturn
+
+
+# class Reference(Generic[To]):
+#     _objects: List[_Object[To]]
+#     _type: Type[To]
+
+#     def __init__(self, type_: Type[To]):
+#         self._type = type_
+
+#     @classmethod
+#     def to(cls, type_: Type[To]) -> "Reference[To]":
+#         return cls[To](type_)
+
+#     def add_object(self, obj: _Object[To]) -> None:
+#         self._objects.append(obj)
+
+#     @property
+#     def objects(self) -> List[_Object[To]]:
+#         return self._objects
+
+# ref = Reference[To]
+
+# ref._type
+
+
+@dataclass
+class Reference(Generic[To]):
+    objects: List[_Object[To]]
 
 
 def _metadata_from_dict(metadata: Dict[str, Any]) -> _MetadataReturn:

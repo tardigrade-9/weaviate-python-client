@@ -1,5 +1,6 @@
 import pytest as pytest
 import uuid
+from dataclasses import dataclass
 
 import weaviate
 from weaviate import Config
@@ -28,6 +29,8 @@ from weaviate.collection.classes import (
     Vectorizer,
     Error,
     TenantActivityStatus,
+    CollectionProperties,
+    Reference,
 )
 from weaviate.collection.grpc import HybridFusion, LinkTo, LinkToMultiTarget, MetadataQuery
 
@@ -70,6 +73,38 @@ def test_insert(client: weaviate.Client):
     assert collection.data.get_by_id(uuid).data["name"] == "some name"
 
     client.collection.delete(name)
+
+
+def test_insert_generic(client: weaviate.Client):
+    name = "TestInsertGeneric"
+
+    @dataclass
+    class TestInsertGenericProperties(CollectionProperties):
+        name: str
+        number: float
+        integer: int
+
+        @classmethod
+        def from_json(cls, data: dict) -> "TestInsertGenericProperties":
+            return cls(**data)
+
+    collection_config = CollectionConfig(
+        name=name,
+        properties=[
+            Property(name="Name", data_type=DataType.TEXT),
+            Property(name="Number", data_type=DataType.NUMBER),
+            Property(name="Integer", data_type=DataType.INT),
+        ],
+        vectorizer=Vectorizer.NONE,
+    )
+
+    collection = client.collection.create(collection_config)
+    uuid = collection.data.insert(data={"name": "some name", "number": 0.5, "integer": 1})
+    obj = collection.data.get_by_id(uuid, type_=TestInsertGenericProperties)
+    assert obj is not None
+    assert obj.data.name == "some name"
+    assert obj.data.number == 0.5
+    assert obj.data.integer == 1
 
 
 def test_insert_many(client: weaviate.Client):
@@ -319,10 +354,10 @@ def test_update_with_tenant(client: weaviate.Client):
         (DataType.NUMBER_ARRAY, [1.0, 2.1]),
     ],
 )
-def test_types(client: weaviate.Client, data_type, value):
+def test_types_data(client: weaviate.Client, data_type, value):
     name = "name"
     collection_config = CollectionConfig(
-        name="Something",
+        name="TestTypesData",
         properties=[Property(name=name, data_type=data_type)],
         vectorizer=Vectorizer.NONE,
     )
@@ -332,7 +367,35 @@ def test_types(client: weaviate.Client, data_type, value):
     object_get = collection.data.get_by_id(uuid_object)
     assert object_get.data[name] == value
 
-    client.collection.delete("Something")
+    client.collection.delete("TestTypesData")
+
+
+@pytest.mark.parametrize(
+    "data_type,value",
+    [
+        (DataType.TEXT, "1"),
+        (DataType.INT, 1),
+        (DataType.NUMBER, 0.5),
+        (DataType.TEXT_ARRAY, ["1", "2"]),
+        (DataType.INT_ARRAY, [1, 2]),
+        (DataType.NUMBER_ARRAY, [1.0, 2.1]),
+    ],
+)
+@pytest.mark.skip(reason="gRPC broken when requesing []string properties")
+def test_types_query(client: weaviate.Client, data_type, value):
+    name = "name"
+    collection_config = CollectionConfig(
+        name="TestTypesQuery",
+        properties=[Property(name=name, data_type=data_type)],
+        vectorizer=Vectorizer.NONE,
+    )
+    collection = client.collection.create(collection_config)
+    collection.data.insert(data={name: value})
+
+    object_get = collection.query.get_flat(return_properties=[name])
+    assert object_get[0].data[name] == value
+
+    client.collection.delete("TestTypesQuery")
 
 
 def test_reference_add_delete_replace(client: weaviate.Client):
@@ -449,6 +512,42 @@ def test_search_after(client: weaviate.Client):
         assert len(objects_after) == nr_objects - 1 - i
 
     client.collection.delete("TestOffset")
+
+
+def test_get_flat_generics(client: weaviate.Client):
+    name = "TestGetFlatGenerics"
+
+    @dataclass
+    class TestGetFlatGenericsProperties(CollectionProperties):
+        name: str
+        number: float
+        integer: int
+
+        @classmethod
+        def from_json(cls, data: dict) -> "TestGetFlatGenericsProperties":
+            return cls(**data)
+
+    collection_config = CollectionConfig(
+        name=name,
+        properties=[
+            Property(name="Name", data_type=DataType.TEXT),
+            Property(name="Number", data_type=DataType.NUMBER),
+            Property(name="Integer", data_type=DataType.INT),
+        ],
+        vectorizer=Vectorizer.NONE,
+    )
+
+    collection = client.collection.create(collection_config)
+    collection.data.insert(data={"name": "some name", "number": 0.5, "integer": 1})
+    obj = collection.query.get_flat(
+        type_=TestGetFlatGenericsProperties, return_properties=["name", "number", "integer"]
+    )[0]
+    assert obj is not None
+    assert obj.data.name == "some name"
+    assert obj.data.number == 0.5
+    assert obj.data.integer == 1
+
+    client.collection.delete(name)
 
 
 def test_autocut(client: weaviate.Client):
@@ -609,6 +708,83 @@ def test_mono_references_grcp(client: weaviate.Client):
     assert objects[0].data["ref"][0].data["name"] == "B"
     assert objects[0].data["ref"][0].data["ref"][0].data["name"] == "A1"
     assert objects[0].data["ref"][0].data["ref"][1].data["name"] == "A2"
+
+
+def test_mono_references_grcp_generics(client: weaviate.Client):
+    @dataclass
+    class AProperties(CollectionProperties):
+        name: str
+
+    A = client.collection.create(
+        CollectionConfig(
+            name="AGeneric",
+            vectorizer=Vectorizer.NONE,
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+            ],
+        )
+    )
+    uuid_A1 = A.data.insert(data={"Name": "A1"})
+    uuid_A2 = A.data.insert(data={"Name": "A2"})
+
+    @dataclass
+    class BProperties(CollectionProperties):
+        name: str
+        ref: Reference[AProperties]
+
+    B = client.collection.create(
+        CollectionConfig(
+            name="BGeneric",
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+                ReferenceProperty(name="ref", target_collection="AGeneric"),
+            ],
+            vectorizer=Vectorizer.NONE,
+        )
+    )
+    uuid_B = B.data.insert({"Name": "B", "ref": ReferenceTo(uuids=uuid_A1)})
+    B.data.reference_add(from_uuid=uuid_B, from_property="ref", ref=ReferenceTo(uuids=uuid_A2))
+
+    @dataclass
+    class CProperties(CollectionProperties):
+        name: str
+        ref: Reference[BProperties]
+
+    C = client.collection.create(
+        CollectionConfig(
+            name="CGeneric",
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+                ReferenceProperty(name="ref", target_collection="BGeneric"),
+            ],
+            vectorizer=Vectorizer.NONE,
+        )
+    )
+    C.data.insert({"Name": "find me", "ref": ReferenceTo(uuids=uuid_B)})
+
+    objects = C.query.bm25_flat(
+        query="find",
+        return_properties=[
+            "name",
+            LinkTo(
+                link_on="ref",
+                properties=[
+                    "name",
+                    LinkTo(
+                        link_on="ref",
+                        properties=["name"],
+                        metadata=MetadataQuery(uuid=True),
+                    ),
+                ],
+                metadata=MetadataQuery(uuid=True, last_update_time_unix=True),
+            ),
+        ],
+        type_=CProperties,
+    )
+    assert objects[0].data.name == "find me"
+    assert objects[0].data.ref.objects[0].data.name == "B"
+    assert objects[0].data.ref.objects[0].data.ref.objects[0].data.name == "A1"
+    assert objects[0].data.ref.objects[0].data.ref.objects[1].data.name == "A2"
 
 
 def test_multi_references_grcp(client: weaviate.Client):
