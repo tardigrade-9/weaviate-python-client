@@ -1,6 +1,6 @@
-from typing import Optional
+from typing import Any, Dict, Optional, Type
 
-from weaviate.collection.classes import CollectionConfig
+from weaviate.collection.classes import CollectionConfig, Properties
 from weaviate.collection.collection_base import CollectionBase
 from weaviate.collection.config import _ConfigCollection
 from weaviate.collection.data import _DataCollection
@@ -24,7 +24,7 @@ class CollectionObject:
         self.name = name
 
         self.config = config
-        self.data = _DataCollection(connection, name, config, consistency_level, tenant)
+        # self.data = _DataCollection(connection, name, config, consistency_level, tenant)
         self.query = _GrpcCollection(connection, name, tenant)
         self.tenants = _Tenants(connection, name)
 
@@ -41,6 +41,16 @@ class CollectionObject:
     ) -> "CollectionObject":
         return CollectionObject(
             self._connection, self.name, self.config, consistency_level, self.__tenant
+        )
+
+    def data(self, type_: Type[Properties] = Dict[str, Any]) -> _DataCollection[Properties]:
+        return _DataCollection[Properties](
+            self._connection,
+            self.name,
+            self.config,
+            self.__consistency_level,
+            self.__tenant,
+            type_,
         )
 
 

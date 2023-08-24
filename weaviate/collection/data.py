@@ -19,7 +19,6 @@ from weaviate.collection.classes import (
     Properties,
     ReferenceToMultiTarget,
     _BatchReturn,
-    SupportsSerialization,
 )
 from weaviate.collection.config import _ConfigBase, _ConfigCollectionModel
 from weaviate.collection.grpc_batch import _BatchGRPC
@@ -292,27 +291,43 @@ class _Data:
         )
 
 
-class _DataCollection(_Data):
-    def _json_to_object(self, obj: Dict[str, Any], type_: Type[Properties]) -> _Object[Properties]:
-        if type_ == Dict[str, Any]:
+class _DataCollection(Generic[Properties], _Data):
+    def __init__(
+        self,
+        connection: Connection,
+        name: str,
+        config: _ConfigBase,
+        consistency_level: Optional[ConsistencyLevel],
+        tenant: Optional[str],
+        type_: Type[Properties],
+    ):
+        super().__init__(connection, name, config, consistency_level, tenant)
+        self.__type = type_
+        self.__type_is_dict = type_ == Dict[str, Any]
+
+    def __json_to_object(self, obj: Dict[str, Any]) -> _Object[Properties]:
+        if self.__type_is_dict:
             data = obj["properties"]
         else:
-            _type = cast(SupportsSerialization, type_)  # cast because of mypy limitation
-            data = _type.from_json(obj["properties"])
+            # _type = cast(SupportsSerialization, self.__type)  # cast because of mypy limitation
+            data = self.__type.from_json(obj["properties"])
         return _Object(
             data=cast(Properties, data),
             metadata=_metadata_from_dict(obj),
         )
 
+    def __object_to_json(self, obj: Properties) -> Dict[str, Any]:
+        return obj.to_json() if not self.__type_is_dict else obj
+
     def insert(
         self,
-        data: Dict[str, Any],
+        data: Properties,
         uuid: Optional[UUID] = None,
         vector: Optional[List[float]] = None,
     ) -> uuid_package.UUID:
         weaviate_obj: Dict[str, Any] = {
             "class": self.name,
-            "properties": self._parse_properties(data),
+            "properties": self._parse_properties(self.__object_to_json(data)),
             "id": str(uuid if uuid is not None else uuid_package.uuid4()),
         }
 
@@ -329,7 +344,7 @@ class _DataCollection(_Data):
     ) -> None:
         weaviate_obj: Dict[str, Any] = {
             "class": self.name,
-            "properties": self._parse_properties(data),
+            "properties": self._parse_properties(self.__object_to_json(data)),
         }
         if vector is not None:
             weaviate_obj["vector"] = vector
@@ -341,7 +356,7 @@ class _DataCollection(_Data):
     ) -> None:
         weaviate_obj: Dict[str, Any] = {
             "class": self.name,
-            "properties": self._parse_properties(data),
+            "properties": self._parse_properties(self.__object_to_json(data)),
         }
         if vector is not None:
             weaviate_obj["vector"] = vector
@@ -352,24 +367,20 @@ class _DataCollection(_Data):
         self,
         uuid: UUID,
         includes: Optional[GetObjectByIdIncludes] = None,
-        type_: Optional[Type[Properties]] = Dict[str, Any],
     ) -> Optional[_Object[Properties]]:
         ret = self._get_by_id(uuid=uuid, includes=includes)
         if ret is None:
             return ret
-        _type = cast(Type[Properties], type_)  # cast because of mypy limitation
-        return self._json_to_object(ret, _type)
+        return self.__json_to_object(ret)
 
     def get(
         self,
         includes: Optional[GetObjectsIncludes] = None,
-        type_: Optional[Type[Properties]] = Dict[str, Any],
     ) -> List[_Object[Properties]]:
         ret = self._get(includes=includes)
         if ret is None:
             return []
-        _type = cast(Type[Properties], type_)  # cast because of mypy limitation
-        return [self._json_to_object(obj, _type) for obj in ret["objects"]]
+        return [self.__json_to_object(obj) for obj in ret["objects"]]
 
     def reference_add(self, from_uuid: UUID, from_property: str, ref: ReferenceTo) -> None:
         self._reference_add(

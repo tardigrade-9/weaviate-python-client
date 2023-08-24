@@ -1,5 +1,5 @@
 import hashlib
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import (
     Union,
@@ -718,6 +718,9 @@ class CollectionProperties:
     @classmethod
     def from_json(cls: "T", data: Dict[str, Any]) -> "T":
         return cls(**data)
+
+    def to_json(self) -> Dict[str, Any]:
+        return asdict(self)
 
 
 T = TypeVar("T", bound=CollectionProperties)
