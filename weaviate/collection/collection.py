@@ -61,7 +61,7 @@ class Collection(CollectionBase):
     def get(
         self, name: str, type_: Type[Properties] = Dict[str, Any]
     ) -> CollectionObject[Properties]:
-        return CollectionObject[Properties](self._connection, name, type_)
+        return CollectionObject[type_](self._connection, name, type_)
 
     def delete(self, name: str) -> None:
         """Use this method to delete a collection from the Weaviate instance by its name.
