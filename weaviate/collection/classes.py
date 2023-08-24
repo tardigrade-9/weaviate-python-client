@@ -727,8 +727,7 @@ class CollectionProperties:
         return asdict(self)
 
 
-# Properties = TypeVar("Properties", bound=Union[dict, TypedDict, CollectionProperties])
-Properties = TypeVar("Properties", bound=Union[dict, TypedDict])
+Properties = TypeVar("Properties", bound=Union[dict, CollectionProperties])
 To = TypeVar("To", bound=Union[dict, TypedDict, CollectionProperties])
 
 Data = TypeVar("Data")
