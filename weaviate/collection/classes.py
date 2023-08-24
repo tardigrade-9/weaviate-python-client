@@ -711,7 +711,6 @@ class SupportsSerialization(Protocol):
         ...
 
 
-@dataclass
 class CollectionProperties:
     # __dataclass_fields__: ClassVar[dict] # https://github.com/python/mypy/issues/6568#issuecomment-1324196557
 
@@ -725,15 +724,15 @@ class CollectionProperties:
 
 T = TypeVar("T", bound=CollectionProperties)
 
-Properties = TypeVar("Properties", bound=Union[Dict[str, Any], CollectionProperties])
-To = TypeVar("To", bound=Union[Dict[str, Any], CollectionProperties])
+Properties = TypeVar("Properties", bound=Union[dict, CollectionProperties])
+To = TypeVar("To", bound=Union[dict, CollectionProperties])
 
 Data = TypeVar("Data")
 
 
 @dataclass
 class _Object(Generic[Data]):
-    data: Data
+    properties: Data
     metadata: _MetadataReturn
 
 

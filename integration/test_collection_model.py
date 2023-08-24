@@ -51,7 +51,7 @@ def client():
 
 def test_with_existing_collection(client: weaviate.Client):
     obj = client.collection_model.get(Group).data.get_by_id(REF_TO_UUID)
-    assert obj.data.name == "Name"
+    assert obj.properties.name == "Name"
 
 
 @pytest.mark.parametrize(

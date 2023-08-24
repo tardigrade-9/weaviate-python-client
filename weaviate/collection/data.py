@@ -303,16 +303,16 @@ class _DataCollection(Generic[Properties], _Data):
     ):
         super().__init__(connection, name, config, consistency_level, tenant)
         self.__type = type_
-        self.__type_is_dict = type_ == Dict[str, Any]
+        self.__type_is_dict = self.__type == dict
 
     def __json_to_object(self, obj: Dict[str, Any]) -> _Object[Properties]:
         if self.__type_is_dict:
-            data = obj["properties"]
+            properties = obj["properties"]
         else:
             # _type = cast(SupportsSerialization, self.__type)  # cast because of mypy limitation
-            data = self.__type.from_json(obj["properties"])
+            properties = self.__type.from_json(obj["properties"])
         return _Object(
-            data=cast(Properties, data),
+            properties=cast(Properties, properties),
             metadata=_metadata_from_dict(obj),
         )
 

@@ -34,45 +34,32 @@ class CollectionObject(Generic[Properties]):
         self.__tenant = tenant
         self.__consistency_level = consistency_level
 
-    def with_tenant(self, tenant: Optional[str] = None) -> "CollectionObject":
-        return CollectionObject[self.__type](
-            self._connection, self.name, self.config, self.__consistency_level, tenant, self.__type
+    def with_tenant(self, tenant: Optional[str] = None) -> "CollectionObject[Properties]":
+        return CollectionObject[Properties](
+            self._connection, self.name, self.__type, self.__consistency_level, tenant
         )
 
     def with_consistency_level(
         self, consistency_level: Optional[ConsistencyLevel] = None
     ) -> "CollectionObject[Properties]":
-        return CollectionObject[self.__type](
-            self._connection, self.name, self.config, consistency_level, self.__tenant, self.__type
+        return CollectionObject[Properties](
+            self._connection, self.name, self.__type, consistency_level, self.__tenant
         )
-
-    def with_data_model(self, type_: Type[Properties]) -> "CollectionObject[Properties]":
-        return CollectionObject[type_](
-            self._connection, self.name, self.config, self.__consistency_level, self.__tenant, type_
-        )
-
-
-class CollectionObjectWrapper:
-    def __init__(self, connection: Connection, name: str) -> None:
-        self._connection = connection
-        self.name = name
-
-    def get(self, type_: Type[Properties]) -> CollectionObject[Properties]:
-        config = _ConfigCollection(self._connection, self.name)
-        return CollectionObject[Properties](self._connection, self.name, config, type_)
 
 
 class Collection(CollectionBase):
-    def create(self, config: CollectionConfig) -> CollectionObject:
+    def create(
+        self, config: CollectionConfig, type_: Type[Properties] = dict
+    ) -> CollectionObject[Properties]:
         name = super()._create(config)
         if config.name != name:
             raise ValueError(
                 f"Name of created collection ({name}) does not match given name ({config.name})"
             )
-        return self.get(name)
+        return self.get(name, type_)
 
-    def get(self, name: str) -> CollectionObject:
-        return CollectionObjectWrapper(self._connection, name)
+    def get(self, name: str, type_: Type[Properties] = dict) -> CollectionObject[Properties]:
+        return CollectionObject[Properties](self._connection, name, type_)
 
     def delete(self, name: str) -> None:
         """Use this method to delete a collection from the Weaviate instance by its name.

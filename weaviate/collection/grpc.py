@@ -8,7 +8,6 @@ from typing import (
     Generic,
     cast,
     Tuple,
-    Any,
     get_type_hints,
 )
 
@@ -425,9 +424,9 @@ class _GrpcCollection(_Grpc):
     def __parse_result(
         self,
         properties: "weaviate_pb2.ResultProperties",
-        type_: Union[Type[Properties], Dict[str, Any]],
+        type_: Type[Properties],
     ) -> Properties:
-        is_dict = type_ == Dict[str, Any]
+        is_dict = type_ == dict
         hints = get_type_hints(type_) if not is_dict else {}
 
         result: Dict[str, Union[_StructValue, List["GrpcResult"]]] = {}
@@ -442,7 +441,7 @@ class _GrpcCollection(_Grpc):
                 result[ref_prop.prop_name] = Reference[hint](
                     objects=[
                         _Object(
-                            data=self.__parse_result(prop, nested_type),
+                            properties=self.__parse_result(prop, nested_type),
                             metadata=self._extract_metadata_for_object(prop.metadata),
                         )
                         for prop in ref_prop.properties
@@ -451,7 +450,7 @@ class _GrpcCollection(_Grpc):
             else:
                 result[ref_prop.prop_name] = [
                     _Object(
-                        data=self.__parse_result(prop, Dict[str, Any]),
+                        properties=self.__parse_result(prop, dict),
                         metadata=self._extract_metadata_for_object(prop.metadata),
                     )
                     for prop in ref_prop.properties
@@ -459,12 +458,10 @@ class _GrpcCollection(_Grpc):
 
         return type_.from_json(result) if not is_dict else result
 
-    def __result_to_object(
-        self, res: SearchResult, type_: Union[Type[Properties], Dict[str, Any]]
-    ) -> _Object[Properties]:
-        data = self.__parse_result(res.properties, type_)
+    def __result_to_object(self, res: SearchResult, type_: Type[Properties]) -> _Object[Properties]:
+        properties = self.__parse_result(res.properties, type_)
         metadata = self._extract_metadata_for_object(res.additional_properties)
-        return _Object[Properties](data=data, metadata=metadata)
+        return _Object[Properties](properties=properties, metadata=metadata)
 
     def get_flat(
         self,
@@ -473,11 +470,10 @@ class _GrpcCollection(_Grpc):
         after: Optional[UUID] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-        type_: Optional[Type[Properties]] = Dict[str, Any],
+        type_: Type[Properties] = dict,
     ) -> List[_Object[Properties]]:
-        _type = cast(Type[Properties], type_)  # cast because of mypy limitation
         return [
-            self.__result_to_object(obj, _type)
+            self.__result_to_object(obj, type_)
             for obj in self._query().get(limit, offset, after, return_metadata, return_properties)
         ]
 
@@ -485,13 +481,12 @@ class _GrpcCollection(_Grpc):
         self,
         returns: ReturnValues,
         options: Optional[GetOptions],
-        type_: Optional[Type[Properties]] = Dict[str, Any],
+        type_: Type[Properties] = dict,
     ) -> List[_Object[Properties]]:
         if options is None:
             options = GetOptions()
-        _type = cast(Type[Properties], type_)  # cast because of mypy limitation
         return [
-            self.__result_to_object(obj, _type)
+            self.__result_to_object(obj, type_)
             for obj in self._query().get(
                 options.limit, options.offset, options.after, returns.metadata, returns.properties
             )
@@ -508,11 +503,10 @@ class _GrpcCollection(_Grpc):
         autocut: Optional[int] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-        type_: Optional[Type[Properties]] = Dict[str, Any],
+        type_: Type[Properties] = dict,
     ) -> List[_Object[Properties]]:
-        _type = cast(Type[Properties], type_)  # cast because of mypy limitation
         return [
-            self.__result_to_object(obj, _type)
+            self.__result_to_object(obj, type_)
             for obj in self._query().hybrid(
                 query,
                 alpha,
@@ -531,13 +525,12 @@ class _GrpcCollection(_Grpc):
         query: str,
         returns: ReturnValues,
         options: Optional[HybridOptions] = None,
-        type_: Optional[Type[Properties]] = Dict[str, Any],
+        type_: Type[Properties] = dict,
     ) -> List[_Object[Properties]]:
         if options is None:
             options = HybridOptions()
-        _type = cast(Type[Properties], type_)  # cast because of mypy limitation
         return [
-            self.__result_to_object(obj, _type)
+            self.__result_to_object(obj, type_)
             for obj in self._query().hybrid(
                 query,
                 options.alpha,
@@ -559,11 +552,10 @@ class _GrpcCollection(_Grpc):
         autocut: Optional[int] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-        type_: Optional[Type[Properties]] = Dict[str, Any],
+        type_: Type[Properties] = dict,
     ) -> List[_Object[Properties]]:
-        _type = cast(Type[Properties], type_)  # cast because of mypy limitation
         return [
-            self.__result_to_object(obj, _type)
+            self.__result_to_object(obj, type_)
             for obj in self._query().bm25(
                 query, properties, limit, autocut, return_metadata, return_properties
             )
@@ -574,13 +566,12 @@ class _GrpcCollection(_Grpc):
         query: str,
         returns: ReturnValues,
         options: Optional[BM25Options] = None,
-        type_: Optional[Type[Properties]] = Dict[str, Any],
+        type_: Type[Properties] = dict,
     ) -> List[_Object[Properties]]:
         if options is None:
             options = BM25Options()
-        _type = cast(Type[Properties], type_)  # cast because of mypy limitation
         return [
-            self.__result_to_object(obj, _type)
+            self.__result_to_object(obj, type_)
             for obj in self._query().bm25(
                 query,
                 options.properties,
@@ -599,11 +590,10 @@ class _GrpcCollection(_Grpc):
         autocut: Optional[int] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-        type_: Optional[Type[Properties]] = Dict[str, Any],
+        type_: Type[Properties] = dict,
     ) -> List[_Object[Properties]]:
-        _type = cast(Type[Properties], type_)  # cast because of mypy limitation
         return [
-            self.__result_to_object(obj, _type)
+            self.__result_to_object(obj, type_)
             for obj in self._query().near_vector(
                 vector, certainty, distance, autocut, return_metadata, return_properties
             )
@@ -614,13 +604,12 @@ class _GrpcCollection(_Grpc):
         vector: List[float],
         returns: ReturnValues,
         options: Optional[NearVectorOptions] = None,
-        type_: Optional[Type[Properties]] = Dict[str, Any],
+        type_: Type[Properties] = dict,
     ) -> List[_Object[Properties]]:
         if options is None:
             options = NearVectorOptions()
-        _type = cast(Type[Properties], type_)  # cast because of mypy limitation
         return [
-            self.__result_to_object(obj, _type)
+            self.__result_to_object(obj, type_)
             for obj in self._query().near_vector(
                 vector,
                 options.certainty,
@@ -639,11 +628,10 @@ class _GrpcCollection(_Grpc):
         autocut: Optional[int] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-        type_: Optional[Type[Properties]] = Dict[str, Any],
+        type_: Type[Properties] = dict,
     ) -> List[_Object[Properties]]:
-        _type = cast(Type[Properties], type_)  # cast because of mypy limitation
         return [
-            self.__result_to_object(obj, _type)
+            self.__result_to_object(obj, type_)
             for obj in self._query().near_object(
                 obj, certainty, distance, autocut, return_metadata, return_properties
             )
@@ -654,13 +642,12 @@ class _GrpcCollection(_Grpc):
         obj: UUID,
         returns: ReturnValues,
         options: Optional[NearObjectOptions] = None,
-        type_: Optional[Type[Properties]] = Dict[str, Any],
+        type_: Type[Properties] = dict,
     ) -> List[_Object[Properties]]:
         if options is None:
             options = NearObjectOptions()
-        _type = cast(Type[Properties], type_)  # cast because of mypy limitation
         return [
-            self.__result_to_object(obj, _type)
+            self.__result_to_object(obj, type_)
             for obj in self._query().near_object(
                 obj,
                 options.certainty,
