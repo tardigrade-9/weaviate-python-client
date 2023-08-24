@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional, List, Tuple, Generic, Type, TypedDict, Union, cast
+from typing import Dict, Any, Optional, List, Tuple, Generic, Type, Union, cast
 
 import uuid as uuid_package
 from google.protobuf.struct_pb2 import Struct
@@ -303,7 +303,7 @@ class _DataCollection(Generic[Properties], _Data):
     ):
         super().__init__(connection, name, config, consistency_level, tenant)
         self.__type = type_
-        self.__type_is_dict = self.__type == (Dict[str, Any] or TypedDict)
+        self.__type_is_dict = type_ == Dict[str, Any]
 
     def __json_to_object(self, obj: Dict[str, Any]) -> _Object[Properties]:
         if self.__type_is_dict:

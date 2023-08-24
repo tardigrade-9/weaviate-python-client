@@ -712,20 +712,23 @@ class SupportsSerialization(Protocol):
         ...
 
 
+T = TypeVar("T", bound="CollectionProperties")
+
+
+@dataclass
 class CollectionProperties:
     # __dataclass_fields__: ClassVar[dict] # https://github.com/python/mypy/issues/6568#issuecomment-1324196557
 
     @classmethod
-    def from_json(cls: "T", data: Dict[str, Any]) -> "T":
+    def from_json(cls: "type[T]", data: Dict[str, Any]) -> "T":
         return cls(**data)
 
     def to_json(self) -> Dict[str, Any]:
         return asdict(self)
 
 
-T = TypeVar("T", bound=CollectionProperties)
-
-Properties = TypeVar("Properties", bound=Union[dict, TypedDict, CollectionProperties])
+# Properties = TypeVar("Properties", bound=Union[dict, TypedDict, CollectionProperties])
+Properties = TypeVar("Properties", bound=Union[dict, TypedDict])
 To = TypeVar("To", bound=Union[dict, TypedDict, CollectionProperties])
 
 Data = TypeVar("Data")
