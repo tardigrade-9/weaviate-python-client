@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, Type
+from typing import Generic, Optional, Type
 
 from weaviate.collection.classes import CollectionConfig, Properties
 from weaviate.collection.collection_base import CollectionBase
@@ -11,20 +11,23 @@ from weaviate.data.replication import ConsistencyLevel
 from weaviate.util import _capitalize_first_letter
 
 
-class CollectionObject:
+class CollectionObject(Generic[Properties]):
     def __init__(
         self,
         connection: Connection,
         name: str,
-        config: _ConfigCollection,
+        type_: Type[Properties],
         consistency_level: Optional[ConsistencyLevel] = None,
         tenant: Optional[str] = None,
     ) -> None:
         self._connection = connection
         self.name = name
+        self.__type = type_
 
-        self.config = config
-        # self.data = _DataCollection(connection, name, config, consistency_level, tenant)
+        self.config = _ConfigCollection(self._connection, name)
+        self.data = _DataCollection[Properties](
+            connection, name, self.config, consistency_level, tenant, type_
+        )
         self.query = _GrpcCollection(connection, name, tenant)
         self.tenants = _Tenants(connection, name)
 
@@ -32,26 +35,31 @@ class CollectionObject:
         self.__consistency_level = consistency_level
 
     def with_tenant(self, tenant: Optional[str] = None) -> "CollectionObject":
-        return CollectionObject(
-            self._connection, self.name, self.config, self.__consistency_level, tenant
+        return CollectionObject[self.__type](
+            self._connection, self.name, self.config, self.__consistency_level, tenant, self.__type
         )
 
     def with_consistency_level(
         self, consistency_level: Optional[ConsistencyLevel] = None
-    ) -> "CollectionObject":
-        return CollectionObject(
-            self._connection, self.name, self.config, consistency_level, self.__tenant
+    ) -> "CollectionObject[Properties]":
+        return CollectionObject[self.__type](
+            self._connection, self.name, self.config, consistency_level, self.__tenant, self.__type
         )
 
-    def data(self, type_: Type[Properties] = Dict[str, Any]) -> _DataCollection[Properties]:
-        return _DataCollection[Properties](
-            self._connection,
-            self.name,
-            self.config,
-            self.__consistency_level,
-            self.__tenant,
-            type_,
+    def with_data_model(self, type_: Type[Properties]) -> "CollectionObject[Properties]":
+        return CollectionObject[type_](
+            self._connection, self.name, self.config, self.__consistency_level, self.__tenant, type_
         )
+
+
+class CollectionObjectWrapper:
+    def __init__(self, connection: Connection, name: str) -> None:
+        self._connection = connection
+        self.name = name
+
+    def get(self, type_: Type[Properties]) -> CollectionObject[Properties]:
+        config = _ConfigCollection(self._connection, self.name)
+        return CollectionObject[Properties](self._connection, self.name, config, type_)
 
 
 class Collection(CollectionBase):
@@ -64,8 +72,7 @@ class Collection(CollectionBase):
         return self.get(name)
 
     def get(self, name: str) -> CollectionObject:
-        config = _ConfigCollection(self._connection, name)
-        return CollectionObject(self._connection, name, config)
+        return CollectionObjectWrapper(self._connection, name)
 
     def delete(self, name: str) -> None:
         """Use this method to delete a collection from the Weaviate instance by its name.

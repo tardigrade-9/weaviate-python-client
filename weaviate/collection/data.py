@@ -317,7 +317,12 @@ class _DataCollection(Generic[Properties], _Data):
         )
 
     def __object_to_json(self, obj: Properties) -> Dict[str, Any]:
-        return obj.to_json() if not self.__type_is_dict else obj
+        if self.__type_is_dict:
+            assert isinstance(obj, dict)
+            return obj
+        else:
+            assert isinstance(obj, self.__type)
+            return obj.to_json()
 
     def insert(
         self,

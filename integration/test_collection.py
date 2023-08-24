@@ -69,20 +69,27 @@ def test_insert(client: weaviate.Client):
         vectorizer=Vectorizer.NONE,
     )
     collection = client.collection.create(collection_config)
-    uuid = collection.data().insert(data={"name": "some name"})
-    assert collection.data().get_by_id(uuid).data["name"] == "some name"
+    uuid = collection.data.insert(data={"name": "some name"})
+    assert collection.data.get_by_id(uuid).data["name"] == "some name"
 
     client.collection.delete(name)
 
 
-def test_insert_generic(client: weaviate.Client):
-    name = "TestInsertGeneric"
+class TestInsertGenericProperties(CollectionProperties):
+    name: str
+    number: float
+    integer: int
 
-    @dataclass
-    class TestInsertGenericProperties(CollectionProperties):
-        name: str
-        number: float
-        integer: int
+
+@pytest.mark.parametrize(
+    "insert_data,should_error",
+    [
+        ({"name": "some name"}, True),
+        (TestInsertGenericProperties(name="some name", number=0.5, integer=1), False),
+    ],
+)
+def test_insert_generic(client: weaviate.Client, insert_data, should_error: bool):
+    name = "TestInsertGeneric"
 
     collection_config = CollectionConfig(
         name=name,
@@ -96,7 +103,11 @@ def test_insert_generic(client: weaviate.Client):
 
     collection = client.collection.create(collection_config)
     data = collection.data(TestInsertGenericProperties)
-    uuid = data.insert(data=TestInsertGenericProperties(name="some name", number=0.5, integer=1))
+    if should_error:
+        with pytest.raises(AssertionError):
+            data.insert(data=insert_data)
+    else:
+        uuid = data.insert(data=insert_data)
     obj = data.get_by_id(uuid)
     assert obj is not None
     assert obj.data.name == "some name"
@@ -112,14 +123,14 @@ def test_insert_many(client: weaviate.Client):
         vectorizer=Vectorizer.NONE,
     )
     collection = client.collection.create(collection_config)
-    ret = collection.data().insert_many(
+    ret = collection.data.insert_many(
         [
             DataObject(data={"name": "some name"}, vector=[1, 2, 3]),
             DataObject(data={"name": "some other name"}, uuid=uuid.uuid4()),
         ]
     )
-    obj1 = collection.data().get_by_id(ret.uuids[0])
-    obj2 = collection.data().get_by_id(ret.uuids[1])
+    obj1 = collection.data.get_by_id(ret.uuids[0])
+    obj2 = collection.data.get_by_id(ret.uuids[1])
     assert obj1.data["name"] == "some name"
     assert obj2.data["name"] == "some other name"
 
@@ -133,8 +144,8 @@ def test_insert_many_with_refs(client: weaviate.Client):
     ref_collection = client.collection.create(
         CollectionConfig(name=name_target, vectorizer=Vectorizer.NONE)
     )
-    uuid_to1 = ref_collection.data().insert(data={})
-    uuid_to2 = ref_collection.data().insert(data={})
+    uuid_to1 = ref_collection.data.insert(data={})
+    uuid_to2 = ref_collection.data.insert(data={})
 
     name = "TestInsertManyRefs"
     client.collection.delete(name)
@@ -149,9 +160,9 @@ def test_insert_many_with_refs(client: weaviate.Client):
         vectorizer=Vectorizer.NONE,
     )
     collection = client.collection.create(collection_config)
-    uuid_from = collection.data().insert(data={"name": "first"})
+    uuid_from = collection.data.insert(data={"name": "first"})
 
-    ret = collection.data().insert_many(
+    ret = collection.data.insert_many(
         [
             DataObject(
                 data={
@@ -173,13 +184,13 @@ def test_insert_many_with_refs(client: weaviate.Client):
             ),
         ]
     )
-    obj1 = collection.data().get_by_id(ret.uuids[0])
+    obj1 = collection.data.get_by_id(ret.uuids[0])
     assert obj1.data["name"] == "some name"
     assert obj1.data["ref_single"][0]["beacon"] == BEACON_START + f"/{name_target}/{uuid_to1}"
     assert obj1.data["ref_single"][1]["beacon"] == BEACON_START + f"/{name_target}/{uuid_to2}"
     assert obj1.data["ref_many"][0]["beacon"] == BEACON_START + f"/{name}/{uuid_from}"
 
-    obj1 = collection.data().get_by_id(ret.uuids[1])
+    obj1 = collection.data.get_by_id(ret.uuids[1])
     assert obj1.data["name"] == "some other name"
     assert obj1.data["ref_single"][0]["beacon"] == BEACON_START + f"/{name_target}/{uuid_to2}"
     assert obj1.data["ref_many"][0]["beacon"] == BEACON_START + f"/{name_target}/{uuid_to1}"
@@ -193,7 +204,7 @@ def test_insert_many_error(client: weaviate.Client):
         vectorizer=Vectorizer.NONE,
     )
     collection = client.collection.create(collection_config)
-    ret = collection.data().insert_many(
+    ret = collection.data.insert_many(
         [
             DataObject(data={"wrong_name": "some name"}, vector=[1, 2, 3]),
             DataObject(data={"name": "some other name"}, uuid=uuid.uuid4()),
@@ -202,7 +213,7 @@ def test_insert_many_error(client: weaviate.Client):
     )
     assert ret.has_errors
 
-    obj = collection.data().get_by_id(ret.uuids[1])
+    obj = collection.data.get_by_id(ret.uuids[1])
     assert obj.data["name"] == "some other name"
 
     assert len(ret.errors) == 2
@@ -228,19 +239,19 @@ def test_insert_many_with_tenant(client: weaviate.Client):
     tenant1 = collection.with_tenant("tenant1")
     tenant2 = collection.with_tenant("tenant2")
 
-    ret = tenant1.data().insert_many(
+    ret = tenant1.data.insert_many(
         [
             DataObject(data={"name": "some name"}, vector=[1, 2, 3]),
             DataObject(data={"name": "some other name"}, uuid=uuid.uuid4()),
         ]
     )
     assert not ret.has_errors
-    obj1 = tenant1.data().get_by_id(ret.uuids[0])
-    obj2 = tenant1.data().get_by_id(ret.uuids[1])
+    obj1 = tenant1.data.get_by_id(ret.uuids[0])
+    obj2 = tenant1.data.get_by_id(ret.uuids[1])
     assert obj1.data["name"] == "some name"
     assert obj2.data["name"] == "some other name"
-    assert tenant2.data().get_by_id(ret.uuids[0]) is None
-    assert tenant2.data().get_by_id(ret.uuids[1]) is None
+    assert tenant2.data.get_by_id(ret.uuids[0]) is None
+    assert tenant2.data.get_by_id(ret.uuids[1]) is None
 
     client.collection.delete(name)
 
@@ -253,9 +264,30 @@ def test_replace(client: weaviate.Client):
         vectorizer=Vectorizer.NONE,
     )
     collection = client.collection.create(collection_config)
-    uuid = collection.data().insert(data={"name": "some name"})
-    collection.data().replace(data={"name": "other name"}, uuid=uuid)
-    assert collection.data().get_by_id(uuid).data["name"] == "other name"
+    uuid = collection.data.insert(data={"name": "some name"})
+    collection.data.replace(data={"name": "other name"}, uuid=uuid)
+    assert collection.data.get_by_id(uuid).data["name"] == "other name"
+
+    client.collection.delete(name)
+
+
+def test_replace_generics(client: weaviate.Client):
+    name = "TestReplaceGenerics"
+
+    class TestReplaceGenericsProperties(CollectionProperties):
+        name: str
+
+    collection_config = CollectionConfig(
+        name=name,
+        properties=[Property(name="Name", data_type=DataType.TEXT)],
+        vectorizer=Vectorizer.NONE,
+    )
+    collection = client.collection.create(collection_config).with_data_model(
+        TestReplaceGenericsProperties
+    )
+    uuid = collection.data.insert(data=TestReplaceGenericsProperties(name="some name"))
+    collection.data.replace(data=TestReplaceGenericsProperties(name="other name"), uuid=uuid)
+    assert collection.data.get_by_id(uuid).data.name == "other name"
 
     client.collection.delete(name)
 
@@ -268,13 +300,13 @@ def test_replace_overwrites_vector(client: weaviate.Client):
         vectorizer=Vectorizer.NONE,
     )
     collection = client.collection.create(collection_config)
-    uuid = collection.data().insert(data={"name": "some name"}, vector=[1, 2, 3])
-    obj = collection.data().get_by_id(uuid, includes=GetObjectByIdIncludes(vector=True))
+    uuid = collection.data.insert(data={"name": "some name"}, vector=[1, 2, 3])
+    obj = collection.data.get_by_id(uuid, includes=GetObjectByIdIncludes(vector=True))
     assert obj.data["name"] == "some name"
     assert obj.metadata.vector == [1, 2, 3]
 
-    collection.data().replace(data={"name": "other name"}, uuid=uuid)
-    obj = collection.data().get_by_id(uuid, includes=GetObjectByIdIncludes(vector=True))
+    collection.data.replace(data={"name": "other name"}, uuid=uuid)
+    obj = collection.data.get_by_id(uuid, includes=GetObjectByIdIncludes(vector=True))
     assert obj.data["name"] == "other name"
     assert obj.metadata.vector is None
 
@@ -295,10 +327,10 @@ def test_replace_with_tenant(client: weaviate.Client):
     tenant1 = collection.with_tenant("tenant1")
     tenant2 = collection.with_tenant("tenant2")
 
-    uuid = tenant1.data().insert(data={"name": "some name"})
-    tenant1.data().replace(data={"name": "other name"}, uuid=uuid)
-    assert tenant1.data().get_by_id(uuid).data["name"] == "other name"
-    assert tenant2.data().get_by_id(uuid) is None
+    uuid = tenant1.data.insert(data={"name": "some name"})
+    tenant1.data.replace(data={"name": "other name"}, uuid=uuid)
+    assert tenant1.data.get_by_id(uuid).data["name"] == "other name"
+    assert tenant2.data.get_by_id(uuid) is None
 
     client.collection.delete(name)
 
@@ -311,9 +343,9 @@ def test_update(client: weaviate.Client):
         vectorizer=Vectorizer.NONE,
     )
     collection = client.collection.create(collection_config)
-    uuid = collection.data().insert(data={"name": "some name"})
-    collection.data().update(data={"name": "other name"}, uuid=uuid)
-    assert collection.data().get_by_id(uuid).data["name"] == "other name"
+    uuid = collection.data.insert(data={"name": "some name"})
+    collection.data.update(data={"name": "other name"}, uuid=uuid)
+    assert collection.data.get_by_id(uuid).data["name"] == "other name"
 
     client.collection.delete(name)
 
@@ -332,10 +364,10 @@ def test_update_with_tenant(client: weaviate.Client):
     tenant1 = collection.with_tenant("tenant1")
     tenant2 = collection.with_tenant("tenant2")
 
-    uuid = tenant1.data().insert(data={"name": "some name"})
-    tenant1.data().update(data={"name": "other name"}, uuid=uuid)
-    assert tenant1.data().get_by_id(uuid).data["name"] == "other name"
-    assert tenant2.data().get_by_id(uuid) is None
+    uuid = tenant1.data.insert(data={"name": "some name"})
+    tenant1.data.update(data={"name": "other name"}, uuid=uuid)
+    assert tenant1.data.get_by_id(uuid).data["name"] == "other name"
+    assert tenant2.data.get_by_id(uuid) is None
 
     client.collection.delete(name)
 
@@ -359,9 +391,9 @@ def test_types_data(client: weaviate.Client, data_type, value):
         vectorizer=Vectorizer.NONE,
     )
     collection = client.collection.create(collection_config)
-    uuid_object = collection.data().insert(data={name: value})
+    uuid_object = collection.data.insert(data={name: value})
 
-    object_get = collection.data().get_by_id(uuid_object)
+    object_get = collection.data.get_by_id(uuid_object)
     assert object_get.data[name] == value
 
     client.collection.delete("TestTypesData")
@@ -387,7 +419,7 @@ def test_types_query(client: weaviate.Client, data_type, value):
         vectorizer=Vectorizer.NONE,
     )
     collection = client.collection.create(collection_config)
-    collection.data().insert(data={name: value})
+    collection.data.insert(data={name: value})
 
     object_get = collection.query.get_flat(return_properties=[name])
     assert object_get[0].data[name] == value
@@ -399,7 +431,7 @@ def test_reference_add_delete_replace(client: weaviate.Client):
     ref_collection = client.collection.create(
         CollectionConfig(name="RefClass2", vectorizer=Vectorizer.NONE)
     )
-    uuid_to = ref_collection.data().insert(data={})
+    uuid_to = ref_collection.data.insert(data={})
     collection_config = CollectionConfig(
         name="SomethingElse",
         properties=[ReferenceProperty(name="ref", target_collection="RefClass2")],
@@ -407,31 +439,31 @@ def test_reference_add_delete_replace(client: weaviate.Client):
     )
     collection = client.collection.create(collection_config)
 
-    uuid_from1 = collection.data().insert({}, uuid.uuid4())
-    uuid_from2 = collection.data().insert({"ref": ReferenceTo(uuids=uuid_to)}, uuid.uuid4())
-    collection.data().reference_add(
+    uuid_from1 = collection.data.insert({}, uuid.uuid4())
+    uuid_from2 = collection.data.insert({"ref": ReferenceTo(uuids=uuid_to)}, uuid.uuid4())
+    collection.data.reference_add(
         from_uuid=uuid_from1, from_property="ref", ref=ReferenceTo(uuids=uuid_to)
     )
-    objects = collection.data().get()
+    objects = collection.data.get()
     for obj in objects:
         assert str(uuid_to) in "".join([ref["beacon"] for ref in obj.data["ref"]])
 
-    collection.data().reference_delete(
+    collection.data.reference_delete(
         from_uuid=uuid_from1, from_property="ref", ref=ReferenceTo(uuids=uuid_to)
     )
-    assert len(collection.data().get_by_id(uuid_from1).data["ref"]) == 0
+    assert len(collection.data.get_by_id(uuid_from1).data["ref"]) == 0
 
-    collection.data().reference_add(
+    collection.data.reference_add(
         from_uuid=uuid_from2, from_property="ref", ref=ReferenceTo(uuids=uuid_to)
     )
-    obj = collection.data().get_by_id(uuid_from2)
+    obj = collection.data.get_by_id(uuid_from2)
     assert len(obj.data["ref"]) == 2
     assert str(uuid_to) in "".join([ref["beacon"] for ref in obj.data["ref"]])
 
-    collection.data().reference_replace(
+    collection.data.reference_replace(
         from_uuid=uuid_from2, from_property="ref", ref=ReferenceTo(uuids=[])
     )
-    assert len(collection.data().get_by_id(uuid_from2).data["ref"]) == 0
+    assert len(collection.data.get_by_id(uuid_from2).data["ref"]) == 0
 
     client.collection.delete("SomethingElse")
     client.collection.delete("RefClass2")
@@ -446,8 +478,8 @@ def test_search_hybrid(client: weaviate.Client, fusion_type):
             vectorizer=Vectorizer.TEXT2VEC_CONTEXTIONARY,
         )
     )
-    collection.data().insert({"Name": "some name"}, uuid.uuid4())
-    collection.data().insert({"Name": "other word"}, uuid.uuid4())
+    collection.data.insert({"Name": "some name"}, uuid.uuid4())
+    collection.data.insert({"Name": "other word"}, uuid.uuid4())
     res = collection.query.hybrid_flat(alpha=0, query="name", fusion_type=fusion_type)
     assert len(res) == 1
     client.collection.delete("Testing")
@@ -463,7 +495,7 @@ def test_search_limit(client: weaviate.Client, limit):
         )
     )
     for i in range(5):
-        collection.data().insert({"Name": str(i)})
+        collection.data.insert({"Name": str(i)})
 
     assert len(collection.query.get_flat(limit=limit)) == limit
 
@@ -482,7 +514,7 @@ def test_search_offset(client: weaviate.Client, offset):
 
     nr_objects = 5
     for i in range(nr_objects):
-        collection.data().insert({"Name": str(i)})
+        collection.data.insert({"Name": str(i)})
 
     objects = collection.query.get_flat(offset=offset)
     assert len(objects) == nr_objects - offset
@@ -501,7 +533,7 @@ def test_search_after(client: weaviate.Client):
 
     nr_objects = 10
     for i in range(nr_objects):
-        collection.data().insert({"Name": str(i)})
+        collection.data.insert({"Name": str(i)})
 
     objects = collection.query.get_flat(return_metadata=MetadataQuery(uuid=True))
     for i, obj in enumerate(objects):
@@ -531,7 +563,7 @@ def test_get_flat_generics(client: weaviate.Client):
     )
 
     collection = client.collection.create(collection_config)
-    collection.data().insert(data={"name": "some name", "number": 0.5, "integer": 1})
+    collection.data.insert(data={"name": "some name", "number": 0.5, "integer": 1})
 
     obj = collection.query.get_flat(
         type_=TestGetFlatGenericsProperties, return_properties=["name", "number", "integer"]
@@ -553,11 +585,11 @@ def test_autocut(client: weaviate.Client):
         )
     )
     for _ in range(4):
-        collection.data().insert({"Name": "rain rain"})
+        collection.data.insert({"Name": "rain rain"})
     for _ in range(4):
-        collection.data().insert({"Name": "rain"})
+        collection.data.insert({"Name": "rain"})
     for _ in range(4):
-        collection.data().insert({"Name": ""})
+        collection.data.insert({"Name": ""})
 
     # match all objects with rain
     objects = collection.query.bm25_flat(query="rain", autocut=0)
@@ -586,12 +618,12 @@ def test_near_vector(client: weaviate.Client):
             vectorizer=Vectorizer.TEXT2VEC_CONTEXTIONARY,
         )
     )
-    uuid_banana = collection.data().insert({"Name": "Banana"})
-    collection.data().insert({"Name": "Fruit"})
-    collection.data().insert({"Name": "car"})
-    collection.data().insert({"Name": "Mountain"})
+    uuid_banana = collection.data.insert({"Name": "Banana"})
+    collection.data.insert({"Name": "Fruit"})
+    collection.data.insert({"Name": "car"})
+    collection.data.insert({"Name": "Mountain"})
 
-    banana = collection.data().get_by_id(uuid_banana, includes=GetObjectByIdIncludes(vector=True))
+    banana = collection.data.get_by_id(uuid_banana, includes=GetObjectByIdIncludes(vector=True))
 
     full_objects = collection.query.near_vector_flat(
         banana.metadata.vector, return_metadata=MetadataQuery(distance=True, certainty=True)
@@ -619,10 +651,10 @@ def test_near_object(client: weaviate.Client):
             vectorizer=Vectorizer.TEXT2VEC_CONTEXTIONARY,
         )
     )
-    uuid_banana = collection.data().insert({"Name": "Banana"})
-    collection.data().insert({"Name": "Fruit"})
-    collection.data().insert({"Name": "car"})
-    collection.data().insert({"Name": "Mountain"})
+    uuid_banana = collection.data.insert({"Name": "Banana"})
+    collection.data.insert({"Name": "Fruit"})
+    collection.data.insert({"Name": "car"})
+    collection.data.insert({"Name": "Mountain"})
 
     full_objects = collection.query.near_object_flat(
         uuid_banana, return_metadata=MetadataQuery(distance=True, certainty=True)
@@ -652,8 +684,8 @@ def test_mono_references_grcp(client: weaviate.Client):
             ],
         )
     )
-    uuid_A1 = A.data().insert(data={"Name": "A1"})
-    uuid_A2 = A.data().insert(data={"Name": "A2"})
+    uuid_A1 = A.data.insert(data={"Name": "A1"})
+    uuid_A2 = A.data.insert(data={"Name": "A2"})
 
     B = client.collection.create(
         CollectionConfig(
@@ -665,8 +697,8 @@ def test_mono_references_grcp(client: weaviate.Client):
             vectorizer=Vectorizer.NONE,
         )
     )
-    uuid_B = B.data().insert({"Name": "B", "ref": ReferenceTo(uuids=uuid_A1)})
-    B.data().reference_add(from_uuid=uuid_B, from_property="ref", ref=ReferenceTo(uuids=uuid_A2))
+    uuid_B = B.data.insert({"Name": "B", "ref": ReferenceTo(uuids=uuid_A1)})
+    B.data.reference_add(from_uuid=uuid_B, from_property="ref", ref=ReferenceTo(uuids=uuid_A2))
 
     C = client.collection.create(
         CollectionConfig(
@@ -678,7 +710,7 @@ def test_mono_references_grcp(client: weaviate.Client):
             vectorizer=Vectorizer.NONE,
         )
     )
-    C.data().insert({"Name": "find me", "ref": ReferenceTo(uuids=uuid_B)})
+    C.data.insert({"Name": "find me", "ref": ReferenceTo(uuids=uuid_B)})
 
     objects = C.query.bm25_flat(
         query="find",
@@ -718,8 +750,8 @@ def test_mono_references_grcp_generics(client: weaviate.Client):
             ],
         )
     )
-    uuid_A1 = A.data().insert(data={"Name": "A1"})
-    uuid_A2 = A.data().insert(data={"Name": "A2"})
+    uuid_A1 = A.data.insert(data={"Name": "A1"})
+    uuid_A2 = A.data.insert(data={"Name": "A2"})
 
     @dataclass
     class BProperties(CollectionProperties):
@@ -736,8 +768,8 @@ def test_mono_references_grcp_generics(client: weaviate.Client):
             vectorizer=Vectorizer.NONE,
         )
     )
-    uuid_B = B.data().insert({"Name": "B", "ref": ReferenceTo(uuids=uuid_A1)})
-    B.data().reference_add(from_uuid=uuid_B, from_property="ref", ref=ReferenceTo(uuids=uuid_A2))
+    uuid_B = B.data.insert({"Name": "B", "ref": ReferenceTo(uuids=uuid_A1)})
+    B.data.reference_add(from_uuid=uuid_B, from_property="ref", ref=ReferenceTo(uuids=uuid_A2))
 
     @dataclass
     class CProperties(CollectionProperties):
@@ -754,7 +786,7 @@ def test_mono_references_grcp_generics(client: weaviate.Client):
             vectorizer=Vectorizer.NONE,
         )
     )
-    C.data().insert({"Name": "find me", "ref": ReferenceTo(uuids=uuid_B)})
+    C.data.insert({"Name": "find me", "ref": ReferenceTo(uuids=uuid_B)})
 
     objects = C.query.bm25_flat(
         query="find",
@@ -795,7 +827,7 @@ def test_multi_references_grcp(client: weaviate.Client):
             ],
         )
     )
-    uuid_A = A.data().insert(data={"Name": "A"})
+    uuid_A = A.data.insert(data={"Name": "A"})
 
     B = client.collection.create(
         CollectionConfig(
@@ -806,7 +838,7 @@ def test_multi_references_grcp(client: weaviate.Client):
             vectorizer=Vectorizer.NONE,
         )
     )
-    uuid_B = B.data().insert({"Name": "B"})
+    uuid_B = B.data.insert({"Name": "B"})
 
     C = client.collection.create(
         CollectionConfig(
@@ -818,10 +850,10 @@ def test_multi_references_grcp(client: weaviate.Client):
             vectorizer=Vectorizer.NONE,
         )
     )
-    C.data().insert(
+    C.data.insert(
         {"Name": "first", "ref": ReferenceToMultiTarget(uuids=uuid_A, target_collection="A")}
     )
-    C.data().insert(
+    C.data.insert(
         {"Name": "second", "ref": ReferenceToMultiTarget(uuids=uuid_B, target_collection="B")}
     )
 
@@ -899,8 +931,8 @@ def test_multi_searches(client: weaviate.Client):
         )
     )
 
-    collection.data().insert(data={"name": "word"})
-    collection.data().insert(data={"name": "other"})
+    collection.data.insert(data={"name": "word"})
+    collection.data.insert(data={"name": "other"})
 
     objects = collection.query.bm25_flat(
         query="word",
@@ -931,7 +963,7 @@ def test_search_with_tenant(client: weaviate.Client):
     collection.tenants.add([Tenant(name="Tenant1"), Tenant(name="Tenant2")])
     tenant1 = collection.with_tenant("Tenant1")
     tenant2 = collection.with_tenant("Tenant2")
-    uuid1 = tenant1.data().insert({"name": "some name"})
+    uuid1 = tenant1.data.insert({"name": "some name"})
     objects1 = tenant1.query.bm25_flat(query="some", return_metadata=MetadataQuery(uuid=True))
     assert len(objects1) == 1
     assert objects1[0].metadata.uuid == uuid1
@@ -956,18 +988,18 @@ def test_get_by_id_with_tenant(client: weaviate.Client):
     tenant1 = collection.with_tenant("Tenant1")
     tenant2 = collection.with_tenant("Tenant2")
 
-    uuid1 = tenant1.data().insert({"name": "some name"})
-    obj1 = tenant1.data().get_by_id(uuid1)
+    uuid1 = tenant1.data.insert({"name": "some name"})
+    obj1 = tenant1.data.get_by_id(uuid1)
     assert obj1.data["name"] == "some name"
 
-    obj2 = tenant2.data().get_by_id(uuid1)
+    obj2 = tenant2.data.get_by_id(uuid1)
     assert obj2 is None
 
-    uuid2 = tenant2.data().insert({"name": "some other name"})
-    obj3 = tenant2.data().get_by_id(uuid2)
+    uuid2 = tenant2.data.insert({"name": "some other name"})
+    obj3 = tenant2.data.get_by_id(uuid2)
     assert obj3.data["name"] == "some other name"
 
-    obj4 = tenant1.data().get_by_id(uuid2)
+    obj4 = tenant1.data.get_by_id(uuid2)
     assert obj4 is None
 
     client.collection.delete("TestTenantGet")
@@ -987,16 +1019,16 @@ def test_get_with_tenant(client: weaviate.Client):
     tenant1 = collection.with_tenant("Tenant1")
     tenant2 = collection.with_tenant("Tenant2")
 
-    tenant1.data().insert({"name": "some name"})
-    objs = tenant1.data().get()
+    tenant1.data.insert({"name": "some name"})
+    objs = tenant1.data.get()
     assert len(objs) == 1
     assert objs[0].data["name"] == "some name"
 
-    objs = tenant2.data().get()
+    objs = tenant2.data.get()
     assert len(objs) == 0
 
-    tenant2.data().insert({"name": "some other name"})
-    objs = tenant2.data().get()
+    tenant2.data.insert({"name": "some other name"})
+    objs = tenant2.data.get()
     assert len(objs) == 1
     assert objs[0].data["name"] == "some other name"
 
@@ -1011,11 +1043,11 @@ def test_add_property(client: weaviate.Client):
             properties=[Property(name="name", data_type=DataType.TEXT)],
         )
     )
-    uuid1 = collection.data().insert({"name": "first"})
+    uuid1 = collection.data.insert({"name": "first"})
     collection.config.add_property(Property(name="number", data_type=DataType.INT))
-    uuid2 = collection.data().insert({"name": "second", "number": 5})
-    obj1 = collection.data().get_by_id(uuid1)
-    obj2 = collection.data().get_by_id(uuid2)
+    uuid2 = collection.data.insert({"name": "second", "number": 5})
+    obj1 = collection.data.get_by_id(uuid1)
+    obj2 = collection.data.get_by_id(uuid2)
     assert "name" in obj1.data
     assert "name" in obj2.data
     assert "number" in obj2.data
@@ -1131,7 +1163,7 @@ def test_empty_search_returns_everything(client: weaviate.Client):
         )
     )
 
-    collection.data().insert(data={"name": "word"})
+    collection.data.insert(data={"name": "word"})
 
     objects = collection.query.bm25_flat(query="word")
     assert "name" in objects[0].data
