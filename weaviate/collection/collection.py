@@ -1,4 +1,4 @@
-from typing import Generic, Optional, Type
+from typing import Any, Dict, Generic, Optional, Type
 
 from weaviate.collection.classes import CollectionConfig, Properties
 from weaviate.collection.collection_base import CollectionBase
@@ -49,7 +49,7 @@ class CollectionObject(Generic[Properties]):
 
 class Collection(CollectionBase):
     def create(
-        self, config: CollectionConfig, type_: Type[Properties] = dict
+        self, config: CollectionConfig, type_: Type[Properties] = Dict[str, Any]
     ) -> CollectionObject[Properties]:
         name = super()._create(config)
         if config.name != name:
@@ -58,7 +58,9 @@ class Collection(CollectionBase):
             )
         return self.get(name, type_)
 
-    def get(self, name: str, type_: Type[Properties] = dict) -> CollectionObject[Properties]:
+    def get(
+        self, name: str, type_: Type[Properties] = Dict[str, Any]
+    ) -> CollectionObject[Properties]:
         return CollectionObject[Properties](self._connection, name, type_)
 
     def delete(self, name: str) -> None:

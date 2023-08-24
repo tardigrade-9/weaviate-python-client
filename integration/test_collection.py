@@ -99,22 +99,21 @@ def test_insert(client: weaviate.Client):
     client.collection.delete(name)
 
 
-@dataclass
-class TestInsertGenericProperties(CollectionProperties):
-    name: str
-    number: float
-    integer: int
-
-
 @pytest.mark.parametrize(
     "insert_data,should_error",
     [
         ({"name": "some name"}, True),
-        (TestInsertGenericProperties(name="some name", number=0.5, integer=1), False),
+        ({"name": "some name", "number": 0.5, "integer": 1}, False),
     ],
 )
 def test_insert_generic(client: weaviate.Client, insert_data, should_error: bool):
     name = "TestInsertGeneric"
+
+    @dataclass
+    class TestInsertGenericProperties(CollectionProperties):
+        name: str
+        number: float
+        integer: int
 
     collection_config = CollectionConfig(
         name=name,
@@ -131,7 +130,7 @@ def test_insert_generic(client: weaviate.Client, insert_data, should_error: bool
         with pytest.raises(AssertionError):
             collection.data.insert(data=insert_data)
     else:
-        uuid = collection.data.insert(data=insert_data)
+        uuid = collection.data.insert(data=TestInsertGenericProperties(**insert_data))
         obj = collection.data.get_by_id(uuid)
         assert obj is not None
         assert obj.properties.name == "some name"

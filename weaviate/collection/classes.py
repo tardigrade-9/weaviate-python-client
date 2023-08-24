@@ -4,6 +4,7 @@ from enum import Enum
 from typing import (
     Union,
     Dict,
+    TypedDict,
     Any,
     Optional,
     List,
@@ -724,8 +725,8 @@ class CollectionProperties:
 
 T = TypeVar("T", bound=CollectionProperties)
 
-Properties = TypeVar("Properties", bound=Union[dict, CollectionProperties])
-To = TypeVar("To", bound=Union[dict, CollectionProperties])
+Properties = TypeVar("Properties", bound=Union[dict, TypedDict, CollectionProperties])
+To = TypeVar("To", bound=Union[dict, TypedDict, CollectionProperties])
 
 Data = TypeVar("Data")
 
