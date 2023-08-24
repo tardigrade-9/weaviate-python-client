@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import (
+    Any,
     Optional,
     List,
     Dict,
@@ -426,7 +427,7 @@ class _GrpcCollection(_Grpc):
         properties: "weaviate_pb2.ResultProperties",
         type_: Type[Properties],
     ) -> Properties:
-        is_dict = type_ == dict
+        is_dict = type_ == Dict[str, Any]
         hints = get_type_hints(type_) if not is_dict else {}
 
         result: Dict[str, Union[_StructValue, List["GrpcResult"]]] = {}
@@ -450,7 +451,7 @@ class _GrpcCollection(_Grpc):
             else:
                 result[ref_prop.prop_name] = [
                     _Object(
-                        properties=self.__parse_result(prop, dict),
+                        properties=self.__parse_result(prop, Dict[str, Any]),
                         metadata=self._extract_metadata_for_object(prop.metadata),
                     )
                     for prop in ref_prop.properties
@@ -470,7 +471,7 @@ class _GrpcCollection(_Grpc):
         after: Optional[UUID] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-        type_: Type[Properties] = dict,
+        type_: Type[Properties] = Dict[str, Any],
     ) -> List[_Object[Properties]]:
         return [
             self.__result_to_object(obj, type_)
@@ -503,7 +504,7 @@ class _GrpcCollection(_Grpc):
         autocut: Optional[int] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-        type_: Type[Properties] = dict,
+        type_: Type[Properties] = Dict[str, Any],
     ) -> List[_Object[Properties]]:
         return [
             self.__result_to_object(obj, type_)
@@ -525,7 +526,7 @@ class _GrpcCollection(_Grpc):
         query: str,
         returns: ReturnValues,
         options: Optional[HybridOptions] = None,
-        type_: Type[Properties] = dict,
+        type_: Type[Properties] = Dict[str, Any],
     ) -> List[_Object[Properties]]:
         if options is None:
             options = HybridOptions()
@@ -552,7 +553,7 @@ class _GrpcCollection(_Grpc):
         autocut: Optional[int] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-        type_: Type[Properties] = dict,
+        type_: Type[Properties] = Dict[str, Any],
     ) -> List[_Object[Properties]]:
         return [
             self.__result_to_object(obj, type_)
@@ -566,7 +567,7 @@ class _GrpcCollection(_Grpc):
         query: str,
         returns: ReturnValues,
         options: Optional[BM25Options] = None,
-        type_: Type[Properties] = dict,
+        type_: Type[Properties] = Dict[str, Any],
     ) -> List[_Object[Properties]]:
         if options is None:
             options = BM25Options()
@@ -590,7 +591,7 @@ class _GrpcCollection(_Grpc):
         autocut: Optional[int] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-        type_: Type[Properties] = dict,
+        type_: Type[Properties] = Dict[str, Any],
     ) -> List[_Object[Properties]]:
         return [
             self.__result_to_object(obj, type_)
@@ -604,7 +605,7 @@ class _GrpcCollection(_Grpc):
         vector: List[float],
         returns: ReturnValues,
         options: Optional[NearVectorOptions] = None,
-        type_: Type[Properties] = dict,
+        type_: Type[Properties] = Dict[str, Any],
     ) -> List[_Object[Properties]]:
         if options is None:
             options = NearVectorOptions()
@@ -628,7 +629,7 @@ class _GrpcCollection(_Grpc):
         autocut: Optional[int] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-        type_: Type[Properties] = dict,
+        type_: Type[Properties] = Dict[str, Any],
     ) -> List[_Object[Properties]]:
         return [
             self.__result_to_object(obj, type_)
@@ -642,7 +643,7 @@ class _GrpcCollection(_Grpc):
         obj: UUID,
         returns: ReturnValues,
         options: Optional[NearObjectOptions] = None,
-        type_: Type[Properties] = dict,
+        type_: Type[Properties] = Dict[str, Any],
     ) -> List[_Object[Properties]]:
         if options is None:
             options = NearObjectOptions()
