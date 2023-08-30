@@ -51,7 +51,7 @@ class Filter:
     path: Union[str, List[str]]
     length: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if isinstance(self.path, str):
             path = [self.path]
         else:

@@ -188,13 +188,13 @@ class BaseProperty(BaseModel):
         }
 
     @staticmethod
-    def remove_optional_type(python_type: type) -> type:
+    def remove_optional_type(python_type: type) -> Union[List[type], type]:
         is_list = get_origin(python_type) == list
         args = get_args(python_type)
         if len(args) == 0:
             return python_type
 
-        return_type = [t for t in args if t is not None][0]
+        return_type: type = [t for t in args if t is not None][0]
 
         if is_list:
             return List[return_type]
