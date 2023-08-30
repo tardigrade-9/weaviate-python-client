@@ -6,10 +6,10 @@ from weaviate_grpc import weaviate_pb2
 
 
 class _Filters:
-    def __and__(self, other: "_Filters"):
+    def __and__(self, other: "_Filters") -> "_FilterAnd":
         return _FilterAnd(self, other)
 
-    def __or__(self, other: "_Filters"):
+    def __or__(self, other: "_Filters") -> "_FilterOr":
         return _FilterOr(self, other)
 
 
@@ -35,8 +35,8 @@ class _FilterOr(_Filters):
         return weaviate_pb2.Filters.OPERATOR_OR
 
 
-FilterValuesList = Union[List[str], List[bool], List[int], List[float], List[datetime.date]]
-FilterValues = Union[int, float, str, bool, datetime.date, None, FilterValuesList]
+FilterValuesList = Union[List[str], List[bool], List[int], List[float], List[datetime]]
+FilterValues = Union[int, float, str, bool, datetime, None, FilterValuesList]
 
 
 @dataclass
