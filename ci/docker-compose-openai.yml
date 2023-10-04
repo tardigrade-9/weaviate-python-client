@@ -9,7 +9,7 @@ services:
       - '8086'
       - --scheme
       - http
-    image: semitechnologies/weaviate:preview-nested-objects-4dc2c30
+    image: semitechnologies/weaviate:preview-async-add-indexqueue-implementation-5eabc4f
     ports:
       - 8086:8086
     restart: on-failure:0
