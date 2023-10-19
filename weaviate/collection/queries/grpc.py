@@ -30,9 +30,9 @@ from weaviate.collection.classes.grpc import (
     Sort,
 )
 from weaviate.collection.classes.internal import _Generative, _GroupBy
-from weaviate.collection.extract_filters import _FilterToGRPC
+from weaviate.collection.filters import _FilterToGRPC
 
-from weaviate.collection.grpc_shared import _BaseGRPC
+from weaviate.collection.grpc import _BaseGRPC
 
 from weaviate.connect import Connection
 from weaviate.exceptions import WeaviateGRPCException
@@ -68,35 +68,6 @@ _PyValue: TypeAlias = Union[
     List[bool],
     List[UUID],
 ]
-
-
-@dataclass
-class SearchResult:
-    """Represents a single search result from Weaviate."""
-
-    properties: search_get_pb2.PropertiesResult
-    metadata: search_get_pb2.MetadataResult
-
-
-@dataclass
-class GroupByResult:
-    """Represents a single group-by result from Weaviate."""
-
-    name: str
-    min_distance: float
-    max_distance: float
-    number_of_objects: int
-    objects: List[SearchResult]
-
-
-@dataclass
-class SearchResponse:
-    """Represents the response from a search request to Weaviate."""
-
-    # the name of these members must match the proto file
-    results: List[SearchResult]
-    generative_grouped_result: str
-    group_by_results: List[GroupByResult]
 
 
 @dataclass
@@ -180,7 +151,7 @@ class _QueryGRPC(_BaseGRPC):
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
         generative: Optional[_Generative] = None,
-    ) -> SearchResponse:
+    ) -> search_get_pb2.SearchReply:
         self._limit = limit
         self._offset = offset
         self._after = after
@@ -204,7 +175,7 @@ class _QueryGRPC(_BaseGRPC):
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
         generative: Optional[_Generative] = None,
-    ) -> SearchResponse:
+    ) -> search_get_pb2.SearchReply:
         self._hybrid_query = query
         self._hybrid_alpha = alpha
         self._hybrid_vector = vector
@@ -234,7 +205,7 @@ class _QueryGRPC(_BaseGRPC):
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
         generative: Optional[_Generative] = None,
-    ) -> SearchResponse:
+    ) -> search_get_pb2.SearchReply:
         self._bm25_query = query
         self._bm25_properties = properties
         self._limit = limit
@@ -259,7 +230,7 @@ class _QueryGRPC(_BaseGRPC):
         generative: Optional[_Generative] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-    ) -> SearchResponse:
+    ) -> search_get_pb2.SearchReply:
         self._near_vector_vec = near_vector
         self._near_certainty = certainty
         self._near_distance = distance
@@ -285,7 +256,7 @@ class _QueryGRPC(_BaseGRPC):
         generative: Optional[_Generative] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-    ) -> SearchResponse:
+    ) -> search_get_pb2.SearchReply:
         self._near_object_obj = near_object
         self._near_certainty = certainty
         self._near_distance = distance
@@ -312,7 +283,7 @@ class _QueryGRPC(_BaseGRPC):
         generative: Optional[_Generative] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-    ) -> SearchResponse:
+    ) -> search_get_pb2.SearchReply:
         if isinstance(near_text, str):
             near_text = [near_text]
         self._near_text = near_text
@@ -352,7 +323,7 @@ class _QueryGRPC(_BaseGRPC):
         generative: Optional[_Generative] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-    ) -> SearchResponse:
+    ) -> search_get_pb2.SearchReply:
         self._near_image = image
         self._near_certainty = certainty
         self._near_distance = distance
@@ -379,7 +350,7 @@ class _QueryGRPC(_BaseGRPC):
         generative: Optional[_Generative] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-    ) -> SearchResponse:
+    ) -> search_get_pb2.SearchReply:
         self._near_video = video
         self._near_certainty = certainty
         self._near_distance = distance
@@ -406,7 +377,7 @@ class _QueryGRPC(_BaseGRPC):
         generative: Optional[_Generative] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-    ) -> SearchResponse:
+    ) -> search_get_pb2.SearchReply:
         self._near_audio = audio
         self._near_certainty = certainty
         self._near_distance = distance
@@ -421,7 +392,7 @@ class _QueryGRPC(_BaseGRPC):
 
         return self.__call()
 
-    def __call(self) -> SearchResponse:
+    def __call(self) -> search_get_pb2.SearchReply:
         metadata: Optional[Tuple[Tuple[str, str], ...]] = None
         access_token = self._connection.get_current_bearer_token()
 
@@ -442,7 +413,7 @@ class _QueryGRPC(_BaseGRPC):
                 self._translate_properties_from_python_to_grpc(self._default_props),
             )
             assert self._connection.grpc_stub is not None
-            res: SearchResponse  # According to PEP-0526
+            res: search_get_pb2.SearchReply  # According to PEP-0526
             res, _ = self._connection.grpc_stub.Search.with_call(
                 search_get_pb2.SearchRequest(
                     collection=self._name,

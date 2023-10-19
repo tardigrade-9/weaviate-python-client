@@ -13,7 +13,7 @@ from weaviate.collection.classes.orm import (
 from weaviate.collection.collection_base import _CollectionBase, _CollectionObjectBase
 from weaviate.collection.config import _ConfigCollectionModel
 from weaviate.collection.data import _DataCollectionModel
-from weaviate.collection.grpc import _GrpcCollectionModel
+from weaviate.collection.query import _GrpcCollectionModel
 from weaviate.collection.tenants import _Tenants
 from weaviate.connect import Connection
 from weaviate.exceptions import UnexpectedStatusCodeException

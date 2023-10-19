@@ -55,7 +55,7 @@ from weaviate.collection.classes.types import (
     Properties,
     TProperties,
 )
-from weaviate.collection.grpc_query import _QueryGRPC, GroupByResult, SearchResponse, SearchResult
+from weaviate.collection.queries.grpc import _QueryGRPC
 from weaviate.connect import Connection
 from weaviate.exceptions import WeaviateGrpcUnavailable
 from weaviate.util import file_encoder_b64
@@ -86,7 +86,7 @@ class _Grpc(Generic[Properties]):
 
     @staticmethod
     def _extract_metadata_for_object(
-        add_props: "search_get_pb2.MetadataResult",
+        add_props: search_get_pb2.MetadataResult,
     ) -> _MetadataResult:
         return _MetadataResult(
             uuid=uuid_lib.UUID(add_props.id) if len(add_props.id) > 0 else None,
@@ -167,7 +167,7 @@ class _Grpc(Generic[Properties]):
         return result
 
     def __parse_ref_properties_result(
-        self, properties: "search_get_pb2.PropertiesResult", type_: Optional[Type[T]]
+        self, properties: search_get_pb2.PropertiesResult, type_: Optional[Type[T]]
     ) -> dict:
         hints = get_type_hints(type_) if get_origin(type_) is not dict and type_ is not None else {}
         result = {}
@@ -201,19 +201,21 @@ class _Grpc(Generic[Properties]):
         return result
 
     def __parse_result(
-        self, properties: "search_get_pb2.PropertiesResult", type_: Optional[Type[T]]
+        self, properties: search_get_pb2.PropertiesResult, type_: Optional[Type[T]]
     ) -> T:
         nonref_result = self.__parse_nonref_properties_result(properties, type_)
         ref_result = self.__parse_ref_properties_result(properties, type_)
         return cast(T, {**nonref_result, **ref_result})
 
-    def __result_to_query_object(self, res: SearchResult, type_: Optional[Type[T]]) -> _Object[T]:
+    def __result_to_query_object(
+        self, res: search_get_pb2.SearchResult, type_: Optional[Type[T]]
+    ) -> _Object[T]:
         properties = self.__parse_result(res.properties, type_)
         metadata = self._extract_metadata_for_object(res.metadata)
         return _Object[T](properties=properties, metadata=metadata._to_return())
 
     def __result_to_generative_object(
-        self, res: SearchResult, type_: Optional[Type[T]]
+        self, res: search_get_pb2.SearchResult, type_: Optional[Type[T]]
     ) -> _GenerativeObject[T]:
         properties = self.__parse_result(res.properties, type_)
         metadata = self._extract_metadata_for_object(res.metadata)
@@ -221,7 +223,9 @@ class _Grpc(Generic[Properties]):
             properties=properties, metadata=metadata._to_return(), generated=metadata.generative
         )
 
-    def __result_to_group(self, res: GroupByResult, type_: Optional[Type[T]]) -> _GroupByResult[T]:
+    def __result_to_group(
+        self, res: search_get_pb2.GroupByResult, type_: Optional[Type[T]]
+    ) -> _GroupByResult[T]:
         return _GroupByResult[T](
             objects=[self.__result_to_query_object(obj, type_) for obj in res.objects],
             name=res.name,
@@ -232,7 +236,7 @@ class _Grpc(Generic[Properties]):
 
     def _result_to_query_return(
         self,
-        res: SearchResponse,
+        res: search_get_pb2.SearchReply,
         type_: Optional[ReturnProperties[TProperties]],
     ) -> QueryReturn[Properties, TProperties]:
         if is_typeddict(type_):
@@ -249,7 +253,7 @@ class _Grpc(Generic[Properties]):
 
     def _result_to_generative_return(
         self,
-        res: SearchResponse,
+        res: search_get_pb2.SearchReply,
         type_: Optional[ReturnProperties[TProperties]],
     ) -> GenerativeReturn[Properties, TProperties]:
         if is_typeddict(type_):
@@ -274,7 +278,7 @@ class _Grpc(Generic[Properties]):
 
     def _result_to_groupby_return(
         self,
-        res: SearchResponse,
+        res: search_get_pb2.SearchReply,
         type_: Optional[ReturnProperties[TProperties]],
     ) -> GroupByReturn[Properties, TProperties]:
         if is_typeddict(type_):

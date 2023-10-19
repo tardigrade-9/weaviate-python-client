@@ -37,8 +37,7 @@ from weaviate.collection.classes.orm import (
 )
 from weaviate.collection.classes.types import Properties, TProperties, _check_data_model
 from weaviate.collection.classes.filters import _Filters
-from weaviate.collection.grpc_batch import _BatchGRPC
-from weaviate.collection.rest_batch import _BatchREST
+from weaviate.collection.batch import _BatchGRPC, _BatchREST
 from weaviate.connect import Connection
 from weaviate.exceptions import (
     UnexpectedStatusCodeException,

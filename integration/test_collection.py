@@ -38,7 +38,7 @@ from weaviate.collection.classes.internal import ReferenceFactory
 from weaviate.collection.classes.tenants import Tenant, TenantActivityStatus
 from weaviate.collection.classes.types import Properties
 from weaviate.collection.data import _DataCollection
-from weaviate.collection.object_iterator import ITERATOR_CACHE_SIZE
+from weaviate.collection.iterator import ITERATOR_CACHE_SIZE
 from weaviate.exceptions import (
     InvalidDataModelException,
     WeaviateGRPCException,

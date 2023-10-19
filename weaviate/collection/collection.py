@@ -23,8 +23,8 @@ from weaviate.collection.classes.types import Properties, TProperties, _check_da
 from weaviate.collection.collection_base import _CollectionBase, _CollectionObjectBase
 from weaviate.collection.config import _ConfigCollection
 from weaviate.collection.data import _DataCollection
-from weaviate.collection.grpc import _GenerateCollection, _GroupByCollection, _QueryCollection
-from weaviate.collection.object_iterator import _ObjectIterator
+from weaviate.collection.query import _GenerateCollection, _GroupByCollection, _QueryCollection
+from weaviate.collection.iterator import _ObjectIterator
 from weaviate.collection.tenants import _Tenants
 from weaviate.connect import Connection
 from weaviate.util import _capitalize_first_letter
