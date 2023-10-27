@@ -1,6 +1,7 @@
 import sys
 from typing import TypedDict
 
+import pytest_asyncio
 import pytest as pytest
 import uuid
 
@@ -34,132 +35,289 @@ def client():
     client.collections.delete_all()
 
 
-def test_reference_add_delete_replace(client: weaviate.WeaviateClient):
-    ref_collection = client.collections.create(
-        name="RefClass2", vectorizer_config=Configure.Vectorizer.none()
+@pytest_asyncio.fixture(scope="function")
+async def aclient():
+    client = weaviate.WeaviateAsyncClient(
+        weaviate.ConnectionParams.from_url("http://localhost:8080", grpc_port=50051)
     )
-    uuid_to = ref_collection.data.insert(properties={})
-    collection = client.collections.create(
-        name="SomethingElse",
-        properties=[ReferenceProperty(name="ref", target_collection="RefClass2")],
-        vectorizer_config=Configure.Vectorizer.none(),
-    )
-
-    uuid_from1 = collection.data.insert({}, uuid.uuid4())
-    uuid_from2 = collection.data.insert({"ref": Reference.to(uuids=uuid_to)}, uuid.uuid4())
-    collection.data.reference_add(
-        from_uuid=uuid_from1, from_property="ref", ref=Reference.to(uuids=uuid_to)
-    )
-
-    collection.data.reference_delete(
-        from_uuid=uuid_from1, from_property="ref", ref=Reference.to(uuids=uuid_to)
-    )
-    assert len(collection.query.fetch_object_by_id(uuid_from1).properties["ref"]) == 0
-
-    collection.data.reference_add(
-        from_uuid=uuid_from2, from_property="ref", ref=Reference.to(uuids=uuid_to)
-    )
-    obj = collection.query.fetch_object_by_id(uuid_from2)
-    assert len(obj.properties["ref"]) == 2
-    assert str(uuid_to) in "".join([ref["beacon"] for ref in obj.properties["ref"]])
-
-    collection.data.reference_replace(
-        from_uuid=uuid_from2, from_property="ref", ref=Reference.to(uuids=[])
-    )
-    assert len(collection.query.fetch_object_by_id(uuid_from2).properties["ref"]) == 0
-
-    client.collections.delete("SomethingElse")
-    client.collections.delete("RefClass2")
+    try:
+        assert await client.connect()
+        await client.collections.delete_all()
+        yield client
+    finally:
+        await client.close()
 
 
-def test_mono_references_grpc(client: weaviate.WeaviateClient):
-    A = client.collections.create(
-        name="A",
-        vectorizer_config=Configure.Vectorizer.none(),
-        properties=[
-            Property(name="Name", data_type=DataType.TEXT),
-        ],
-    )
-    uuid_A1 = A.data.insert(properties={"Name": "A1"})
-    uuid_A2 = A.data.insert(properties={"Name": "A2"})
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_reference_add_delete_replace(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
+    if is_sync:
+        ref_collection = client.collections.create(
+            name="RefClass2", vectorizer_config=Configure.Vectorizer.none()
+        )
+        uuid_to = ref_collection.data.insert(properties={})
+        collection = client.collections.create(
+            name="SomethingElse",
+            properties=[ReferenceProperty(name="ref", target_collection="RefClass2")],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
 
-    objects = A.query.bm25(query="A1", return_properties="name").objects
-    assert objects[0].properties["name"] == "A1"
+        uuid_from1 = collection.data.insert({}, uuid.uuid4())
+        uuid_from2 = collection.data.insert({"ref": Reference.to(uuids=uuid_to)}, uuid.uuid4())
+        collection.data.reference_add(
+            from_uuid=uuid_from1, from_property="ref", ref=Reference.to(uuids=uuid_to)
+        )
 
-    B = client.collections.create(
-        name="B",
-        properties=[
-            Property(name="Name", data_type=DataType.TEXT),
-            ReferenceProperty(name="ref", target_collection="A"),
-        ],
-        vectorizer_config=Configure.Vectorizer.none(),
-    )
-    uuid_B = B.data.insert({"Name": "B", "ref": Reference.to(uuids=uuid_A1)})
-    B.data.reference_add(from_uuid=uuid_B, from_property="ref", ref=Reference.to(uuids=uuid_A2))
+        collection.data.reference_delete(
+            from_uuid=uuid_from1, from_property="ref", ref=Reference.to(uuids=uuid_to)
+        )
+        assert len(collection.query.fetch_object_by_id(uuid_from1).properties["ref"]) == 0
 
-    objects = B.query.bm25(
-        query="B",
-        return_properties=FromReference(
-            link_on="ref",
-            return_properties=["name"],
-        ),
-    ).objects
-    assert objects[0].properties["ref"].objects[0].properties["name"] == "A1"
-    assert objects[0].properties["ref"].objects[1].properties["name"] == "A2"
+        collection.data.reference_add(
+            from_uuid=uuid_from2, from_property="ref", ref=Reference.to(uuids=uuid_to)
+        )
+        obj = collection.query.fetch_object_by_id(uuid_from2)
+        assert len(obj.properties["ref"]) == 2
+        assert str(uuid_to) in "".join([ref["beacon"] for ref in obj.properties["ref"]])
 
-    objects = B.query.bm25(
-        query="B",
-        return_properties=[
-            FromReference(
+        collection.data.reference_replace(
+            from_uuid=uuid_from2, from_property="ref", ref=Reference.to(uuids=[])
+        )
+        assert len(collection.query.fetch_object_by_id(uuid_from2).properties["ref"]) == 0
+
+        client.collections.delete("SomethingElse")
+        client.collections.delete("RefClass2")
+    else:
+        ref_collection = await aclient.collections.create(
+            name="RefClass2", vectorizer_config=Configure.Vectorizer.none()
+        )
+        uuid_to = await ref_collection.data.insert(properties={})
+        collection = await aclient.collections.create(
+            name="SomethingElse",
+            properties=[ReferenceProperty(name="ref", target_collection="RefClass2")],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+
+        uuid_from1 = await collection.data.insert({}, uuid.uuid4())
+        uuid_from2 = await collection.data.insert(
+            {"ref": Reference.to(uuids=uuid_to)}, uuid.uuid4()
+        )
+        await collection.data.reference_add(
+            from_uuid=uuid_from1, from_property="ref", ref=Reference.to(uuids=uuid_to)
+        )
+
+        await collection.data.reference_delete(
+            from_uuid=uuid_from1, from_property="ref", ref=Reference.to(uuids=uuid_to)
+        )
+        assert len((await collection.query.fetch_object_by_id(uuid_from1)).properties["ref"]) == 0
+
+        await collection.data.reference_add(
+            from_uuid=uuid_from2, from_property="ref", ref=Reference.to(uuids=uuid_to)
+        )
+        obj = await collection.query.fetch_object_by_id(uuid_from2)
+        assert len(obj.properties["ref"]) == 2
+        assert str(uuid_to) in "".join([ref["beacon"] for ref in obj.properties["ref"]])
+
+        await collection.data.reference_replace(
+            from_uuid=uuid_from2, from_property="ref", ref=Reference.to(uuids=[])
+        )
+        assert len((await collection.query.fetch_object_by_id(uuid_from2)).properties["ref"]) == 0
+
+        await aclient.collections.delete("SomethingElse")
+        await aclient.collections.delete("RefClass2")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_mono_references_grpc(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
+    if is_sync:
+        A = client.collections.create(
+            name="A",
+            vectorizer_config=Configure.Vectorizer.none(),
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+            ],
+        )
+        uuid_A1 = A.data.insert(properties={"Name": "A1"})
+        uuid_A2 = A.data.insert(properties={"Name": "A2"})
+
+        objects = A.query.bm25(query="A1", return_properties="name").objects
+        assert objects[0].properties["name"] == "A1"
+
+        B = client.collections.create(
+            name="B",
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+                ReferenceProperty(name="ref", target_collection="A"),
+            ],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        uuid_B = B.data.insert({"Name": "B", "ref": Reference.to(uuids=uuid_A1)})
+        B.data.reference_add(from_uuid=uuid_B, from_property="ref", ref=Reference.to(uuids=uuid_A2))
+
+        objects = B.query.bm25(
+            query="B",
+            return_properties=FromReference(
                 link_on="ref",
                 return_properties=["name"],
-                return_metadata=MetadataQuery(uuid=True),
+            ),
+        ).objects
+        assert objects[0].properties["ref"].objects[0].properties["name"] == "A1"
+        assert objects[0].properties["ref"].objects[1].properties["name"] == "A2"
+
+        objects = B.query.bm25(
+            query="B",
+            return_properties=[
+                FromReference(
+                    link_on="ref",
+                    return_properties=["name"],
+                    return_metadata=MetadataQuery(uuid=True),
+                )
+            ],
+        ).objects
+        assert objects[0].properties["ref"].objects[0].properties["name"] == "A1"
+        assert objects[0].properties["ref"].objects[0].metadata.uuid == uuid_A1
+        assert objects[0].properties["ref"].objects[1].properties["name"] == "A2"
+        assert objects[0].properties["ref"].objects[1].metadata.uuid == uuid_A2
+
+        C = client.collections.create(
+            name="C",
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+                ReferenceProperty(name="ref", target_collection="B"),
+            ],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        C.data.insert({"Name": "find me", "ref": Reference.to(uuids=uuid_B)})
+
+        objects = C.query.bm25(
+            query="find",
+            return_properties=[
+                "name",
+                FromReference(
+                    link_on="ref",
+                    return_properties=[
+                        "name",
+                        FromReference(
+                            link_on="ref",
+                            return_properties=["name"],
+                            return_metadata=MetadataQuery(uuid=True),
+                        ),
+                    ],
+                    return_metadata=MetadataQuery(uuid=True, last_update_time_unix=True),
+                ),
+            ],
+        ).objects
+        assert objects[0].properties["name"] == "find me"
+        assert objects[0].properties["ref"].objects[0].properties["name"] == "B"
+        assert (
+            objects[0].properties["ref"].objects[0].properties["ref"].objects[0].properties["name"]
+            == "A1"
+        )
+        assert (
+            objects[0].properties["ref"].objects[0].properties["ref"].objects[1].properties["name"]
+            == "A2"
+        )
+    else:
+        A = await aclient.collections.create(
+            name="A",
+            vectorizer_config=Configure.Vectorizer.none(),
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+            ],
+        )
+        uuid_A1 = await A.data.insert(properties={"Name": "A1"})
+        uuid_A2 = await A.data.insert(properties={"Name": "A2"})
+
+        objects = (await A.query.bm25(query="A1", return_properties="name")).objects
+        assert objects[0].properties["name"] == "A1"
+
+        B = await aclient.collections.create(
+            name="B",
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+                ReferenceProperty(name="ref", target_collection="A"),
+            ],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        uuid_B = await B.data.insert({"Name": "B", "ref": Reference.to(uuids=uuid_A1)})
+        await B.data.reference_add(
+            from_uuid=uuid_B, from_property="ref", ref=Reference.to(uuids=uuid_A2)
+        )
+
+        objects = (
+            await B.query.bm25(
+                query="B",
+                return_properties=FromReference(
+                    link_on="ref",
+                    return_properties=["name"],
+                ),
             )
-        ],
-    ).objects
-    assert objects[0].properties["ref"].objects[0].properties["name"] == "A1"
-    assert objects[0].properties["ref"].objects[0].metadata.uuid == uuid_A1
-    assert objects[0].properties["ref"].objects[1].properties["name"] == "A2"
-    assert objects[0].properties["ref"].objects[1].metadata.uuid == uuid_A2
+        ).objects
+        assert objects[0].properties["ref"].objects[0].properties["name"] == "A1"
+        assert objects[0].properties["ref"].objects[1].properties["name"] == "A2"
 
-    C = client.collections.create(
-        name="C",
-        properties=[
-            Property(name="Name", data_type=DataType.TEXT),
-            ReferenceProperty(name="ref", target_collection="B"),
-        ],
-        vectorizer_config=Configure.Vectorizer.none(),
-    )
-    C.data.insert({"Name": "find me", "ref": Reference.to(uuids=uuid_B)})
-
-    objects = C.query.bm25(
-        query="find",
-        return_properties=[
-            "name",
-            FromReference(
-                link_on="ref",
+        objects = (
+            await B.query.bm25(
+                query="B",
                 return_properties=[
-                    "name",
                     FromReference(
                         link_on="ref",
                         return_properties=["name"],
                         return_metadata=MetadataQuery(uuid=True),
+                    )
+                ],
+            )
+        ).objects
+        assert objects[0].properties["ref"].objects[0].properties["name"] == "A1"
+        assert objects[0].properties["ref"].objects[0].metadata.uuid == uuid_A1
+        assert objects[0].properties["ref"].objects[1].properties["name"] == "A2"
+        assert objects[0].properties["ref"].objects[1].metadata.uuid == uuid_A2
+
+        C = await aclient.collections.create(
+            name="C",
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+                ReferenceProperty(name="ref", target_collection="B"),
+            ],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        await C.data.insert({"Name": "find me", "ref": Reference.to(uuids=uuid_B)})
+
+        objects = (
+            await C.query.bm25(
+                query="find",
+                return_properties=[
+                    "name",
+                    FromReference(
+                        link_on="ref",
+                        return_properties=[
+                            "name",
+                            FromReference(
+                                link_on="ref",
+                                return_properties=["name"],
+                                return_metadata=MetadataQuery(uuid=True),
+                            ),
+                        ],
+                        return_metadata=MetadataQuery(uuid=True, last_update_time_unix=True),
                     ),
                 ],
-                return_metadata=MetadataQuery(uuid=True, last_update_time_unix=True),
-            ),
-        ],
-    ).objects
-    assert objects[0].properties["name"] == "find me"
-    assert objects[0].properties["ref"].objects[0].properties["name"] == "B"
-    assert (
-        objects[0].properties["ref"].objects[0].properties["ref"].objects[0].properties["name"]
-        == "A1"
-    )
-    assert (
-        objects[0].properties["ref"].objects[0].properties["ref"].objects[1].properties["name"]
-        == "A2"
-    )
+            )
+        ).objects
+        assert objects[0].properties["name"] == "find me"
+        assert objects[0].properties["ref"].objects[0].properties["name"] == "B"
+        assert (
+            objects[0].properties["ref"].objects[0].properties["ref"].objects[0].properties["name"]
+            == "A1"
+        )
+        assert (
+            objects[0].properties["ref"].objects[0].properties["ref"].objects[1].properties["name"]
+            == "A2"
+        )
 
 
 def test_mono_references_grpc_typed_dicts(client: weaviate.WeaviateClient):
@@ -339,55 +497,115 @@ def test_multi_references_grpc(client: weaviate.WeaviateClient):
     client.collections.delete("C")
 
 
-def test_references_batch(client: weaviate.WeaviateClient):
-    name_ref_to = "TestBatchRefTo"
-    name_ref_from = "TestBatchRefFrom"
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_references_batch(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
+    if is_sync:
+        name_ref_to = "TestBatchRefTo"
+        name_ref_from = "TestBatchRefFrom"
 
-    client.collections.delete(name_ref_to)
-    client.collections.delete(name_ref_from)
+        client.collections.delete(name_ref_to)
+        client.collections.delete(name_ref_from)
 
-    ref_collection = client.collections.create(
-        name=name_ref_to,
-        vectorizer_config=Configure.Vectorizer.none(),
-        properties=[Property(name="num", data_type=DataType.INT)],
-    )
-    num_objects = 10
+        ref_collection = client.collections.create(
+            name=name_ref_to,
+            vectorizer_config=Configure.Vectorizer.none(),
+            properties=[Property(name="num", data_type=DataType.INT)],
+        )
+        num_objects = 10
 
-    uuids_to = ref_collection.data.insert_many(
-        [DataObject(properties={"num": i}) for i in range(num_objects)]
-    ).uuids.values()
-    collection = client.collections.create(
-        name=name_ref_from,
-        properties=[
-            ReferenceProperty(name="ref", target_collection=name_ref_to),
-            Property(name="num", data_type=DataType.INT),
-        ],
-        vectorizer_config=Configure.Vectorizer.none(),
-    )
-    uuids_from = collection.data.insert_many(
-        [DataObject(properties={"num": i}) for i in range(num_objects)]
-    ).uuids.values()
+        uuids_to = ref_collection.data.insert_many(
+            [DataObject(properties={"num": i}) for i in range(num_objects)]
+        ).uuids.values()
+        collection = client.collections.create(
+            name=name_ref_from,
+            properties=[
+                ReferenceProperty(name="ref", target_collection=name_ref_to),
+                Property(name="num", data_type=DataType.INT),
+            ],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        uuids_from = collection.data.insert_many(
+            [DataObject(properties={"num": i}) for i in range(num_objects)]
+        ).uuids.values()
 
-    batch_return = collection.data.reference_add_many(
-        [
-            DataReference(
-                from_property="ref", from_uuid=list(uuids_from)[i], to_uuid=list(uuids_to)[i]
+        batch_return = collection.data.reference_add_many(
+            [
+                DataReference(
+                    from_property="ref", from_uuid=list(uuids_from)[i], to_uuid=list(uuids_to)[i]
+                )
+                for i in range(num_objects)
+            ],
+        )
+
+        assert batch_return.has_errors is False
+
+        objects = collection.query.fetch_objects(
+            return_properties=[
+                "num",
+                FromReference(link_on="ref"),
+            ],
+        ).objects
+
+        for obj in objects:
+            assert obj.properties["num"] == obj.properties["ref"].objects[0].properties["num"]
+    else:
+        name_ref_to = "TestBatchRefTo"
+        name_ref_from = "TestBatchRefFrom"
+
+        await aclient.collections.delete(name_ref_to)
+        await aclient.collections.delete(name_ref_from)
+
+        ref_collection = await aclient.collections.create(
+            name=name_ref_to,
+            vectorizer_config=Configure.Vectorizer.none(),
+            properties=[Property(name="num", data_type=DataType.INT)],
+        )
+        num_objects = 10
+
+        uuids_to = (
+            await ref_collection.data.insert_many(
+                [DataObject(properties={"num": i}) for i in range(num_objects)]
             )
-            for i in range(num_objects)
-        ],
-    )
+        ).uuids.values()
+        collection = await aclient.collections.create(
+            name=name_ref_from,
+            properties=[
+                ReferenceProperty(name="ref", target_collection=name_ref_to),
+                Property(name="num", data_type=DataType.INT),
+            ],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        uuids_from = (
+            await collection.data.insert_many(
+                [DataObject(properties={"num": i}) for i in range(num_objects)]
+            )
+        ).uuids.values()
 
-    assert batch_return.has_errors is False
+        batch_return = await collection.data.reference_add_many(
+            [
+                DataReference(
+                    from_property="ref", from_uuid=list(uuids_from)[i], to_uuid=list(uuids_to)[i]
+                )
+                for i in range(num_objects)
+            ],
+        )
 
-    objects = collection.query.fetch_objects(
-        return_properties=[
-            "num",
-            FromReference(link_on="ref"),
-        ],
-    ).objects
+        assert batch_return.has_errors is False
 
-    for obj in objects:
-        assert obj.properties["num"] == obj.properties["ref"].objects[0].properties["num"]
+        objects = (
+            await collection.query.fetch_objects(
+                return_properties=[
+                    "num",
+                    FromReference(link_on="ref"),
+                ],
+            )
+        ).objects
+
+        for obj in objects:
+            assert obj.properties["num"] == obj.properties["ref"].objects[0].properties["num"]
 
 
 def test_references_batch_with_errors(client: weaviate.WeaviateClient):

@@ -1,6 +1,7 @@
 import os
 from typing import List
 
+import pytest_asyncio
 import pytest
 
 import weaviate
@@ -28,32 +29,83 @@ def client():
     client.collections.delete_all()
 
 
+@pytest_asyncio.fixture(scope="function")
+async def aclient():
+    api_key = os.environ.get("OPENAI_APIKEY")
+    if api_key is None:
+        pytest.skip("No OpenAI API key found.")
+
+    client = weaviate.WeaviateAsyncClient(
+        weaviate.ConnectionParams.from_url("http://localhost:8086", grpc_port=50057),
+        additional_headers={"X-OpenAI-Api-Key": api_key},
+    )
+    try:
+        assert await client.connect()
+        await client.collections.delete_all()
+        yield client
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("parameter,answer", [("text", "Yes"), ("content", "No")])
-def test_generative_search_single(client: weaviate.WeaviateClient, parameter: str, answer: str):
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_generative_search_single(
+    client: weaviate.WeaviateClient,
+    aclient: weaviate.WeaviateAsyncClient,
+    parameter: str,
+    answer: str,
+    is_sync: bool,
+):
     name = "TestGenerativeSearchOpenAISingle"
-    client.collections.delete(name)
-    collection = client.collections.create(
-        name=name,
-        properties=[
-            Property(name="text", data_type=DataType.TEXT),
-            Property(name="content", data_type=DataType.TEXT),
-        ],
-        generative_config=Configure.Generative.openai(),
-    )
+    if is_sync:
+        client.collections.delete(name)
+        collection = client.collections.create(
+            name=name,
+            properties=[
+                Property(name="text", data_type=DataType.TEXT),
+                Property(name="content", data_type=DataType.TEXT),
+            ],
+            generative_config=Configure.Generative.openai(),
+        )
 
-    collection.data.insert_many(
-        [
-            DataObject(properties={"text": "bananas are great", "content": "bananas are bad"}),
-            DataObject(properties={"text": "apples are great", "content": "apples are bad"}),
-        ]
-    )
+        collection.data.insert_many(
+            [
+                DataObject(properties={"text": "bananas are great", "content": "bananas are bad"}),
+                DataObject(properties={"text": "apples are great", "content": "apples are bad"}),
+            ]
+        )
 
-    res = collection.generate.fetch_objects(
-        single_prompt=f"is it good or bad based on {{{parameter}}}? Just answer with yes or no without punctuation"
-    )
-    for obj in res.objects:
-        assert obj.generated == answer
-    assert res.generated is None
+        res = collection.generate.fetch_objects(
+            single_prompt=f"is it good or bad based on {{{parameter}}}? Just answer with yes or no without punctuation"
+        )
+        for obj in res.objects:
+            assert obj.generated == answer
+        assert res.generated is None
+    else:
+        await aclient.collections.delete(name)
+        collection = await aclient.collections.create(
+            name=name,
+            properties=[
+                Property(name="text", data_type=DataType.TEXT),
+                Property(name="content", data_type=DataType.TEXT),
+            ],
+            generative_config=Configure.Generative.openai(),
+        )
+
+        await collection.data.insert_many(
+            [
+                DataObject(properties={"text": "bananas are great", "content": "bananas are bad"}),
+                DataObject(properties={"text": "apples are great", "content": "apples are bad"}),
+            ]
+        )
+
+        res = await collection.generate.fetch_objects(
+            single_prompt=f"is it good or bad based on {{{parameter}}}? Just answer with yes or no without punctuation"
+        )
+        for obj in res.objects:
+            assert obj.generated == answer
+        assert res.generated is None
 
 
 @pytest.mark.parametrize(

@@ -1,13 +1,5 @@
 from dataclasses import dataclass
-from typing import (
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    Union,
-    cast,
-)
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union, cast, overload
 
 from typing_extensions import TypeAlias
 
@@ -34,7 +26,7 @@ from weaviate.collections.filters import _FilterToGRPC
 
 from weaviate.collections.grpc.shared import _BaseGRPC
 
-from weaviate.connect import Connection
+from weaviate.connect.base import _ConnectionBase
 from weaviate.exceptions import WeaviateQueryException
 from weaviate.types import UUID
 
@@ -109,7 +101,7 @@ class _Move:
 class _QueryGRPC(_BaseGRPC):
     def __init__(
         self,
-        connection: Connection,
+        connection: _ConnectionBase,
         name: str,
         tenant: Optional[str],
         consistency_level: Optional[ConsistencyLevel],
@@ -180,7 +172,7 @@ class _QueryGRPC(_BaseGRPC):
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
         generative: Optional[_Generative] = None,
-    ) -> SearchResponse:
+    ) -> "_QueryGRPC":
         self._limit = limit
         self._offset = offset
         self._after = after
@@ -189,7 +181,7 @@ class _QueryGRPC(_BaseGRPC):
         self.__parse_sort(sort)
         self.__merge_default_and_return_properties(return_properties)
         self._generative = generative
-        return self.__call()
+        return self
 
     def hybrid(
         self,
@@ -204,7 +196,7 @@ class _QueryGRPC(_BaseGRPC):
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
         generative: Optional[_Generative] = None,
-    ) -> SearchResponse:
+    ) -> "_QueryGRPC":
         self._hybrid_query = query
         self._hybrid_alpha = alpha
         self._hybrid_vector = vector
@@ -222,7 +214,7 @@ class _QueryGRPC(_BaseGRPC):
 
         self._generative = generative
 
-        return self.__call()
+        return self
 
     def bm25(
         self,
@@ -234,7 +226,7 @@ class _QueryGRPC(_BaseGRPC):
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
         generative: Optional[_Generative] = None,
-    ) -> SearchResponse:
+    ) -> "_QueryGRPC":
         self._bm25_query = query
         self._bm25_properties = properties
         self._limit = limit
@@ -245,7 +237,7 @@ class _QueryGRPC(_BaseGRPC):
 
         self._generative = generative
 
-        return self.__call()
+        return self
 
     def near_vector(
         self,
@@ -259,7 +251,7 @@ class _QueryGRPC(_BaseGRPC):
         generative: Optional[_Generative] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-    ) -> SearchResponse:
+    ) -> "_QueryGRPC":
         self._near_vector_vec = near_vector
         self._near_certainty = certainty
         self._near_distance = distance
@@ -271,7 +263,7 @@ class _QueryGRPC(_BaseGRPC):
         self._generative = generative
         self.__merge_default_and_return_properties(return_properties)
 
-        return self.__call()
+        return self
 
     def near_object(
         self,
@@ -285,7 +277,7 @@ class _QueryGRPC(_BaseGRPC):
         generative: Optional[_Generative] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-    ) -> SearchResponse:
+    ) -> "_QueryGRPC":
         self._near_object_obj = near_object
         self._near_certainty = certainty
         self._near_distance = distance
@@ -296,7 +288,7 @@ class _QueryGRPC(_BaseGRPC):
         self.__merge_default_and_return_properties(return_properties)
         self._group_by = group_by
         self._generative = generative
-        return self.__call()
+        return self
 
     def near_text(
         self,
@@ -312,7 +304,7 @@ class _QueryGRPC(_BaseGRPC):
         generative: Optional[_Generative] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-    ) -> SearchResponse:
+    ) -> "_QueryGRPC":
         if isinstance(near_text, str):
             near_text = [near_text]
         self._near_text = near_text
@@ -338,7 +330,7 @@ class _QueryGRPC(_BaseGRPC):
         self._metadata = return_metadata
         self.__merge_default_and_return_properties(return_properties)
 
-        return self.__call()
+        return self
 
     def near_image(
         self,
@@ -352,7 +344,7 @@ class _QueryGRPC(_BaseGRPC):
         generative: Optional[_Generative] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-    ) -> SearchResponse:
+    ) -> "_QueryGRPC":
         self._near_image = image
         self._near_certainty = certainty
         self._near_distance = distance
@@ -365,7 +357,7 @@ class _QueryGRPC(_BaseGRPC):
         self._metadata = return_metadata
         self.__merge_default_and_return_properties(return_properties)
 
-        return self.__call()
+        return self
 
     def near_video(
         self,
@@ -379,7 +371,7 @@ class _QueryGRPC(_BaseGRPC):
         generative: Optional[_Generative] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-    ) -> SearchResponse:
+    ) -> "_QueryGRPC":
         self._near_video = video
         self._near_certainty = certainty
         self._near_distance = distance
@@ -392,7 +384,7 @@ class _QueryGRPC(_BaseGRPC):
         self._metadata = return_metadata
         self.__merge_default_and_return_properties(return_properties)
 
-        return self.__call()
+        return self
 
     def near_audio(
         self,
@@ -406,7 +398,7 @@ class _QueryGRPC(_BaseGRPC):
         generative: Optional[_Generative] = None,
         return_metadata: Optional[MetadataQuery] = None,
         return_properties: Optional[PROPERTIES] = None,
-    ) -> SearchResponse:
+    ) -> "_QueryGRPC":
         self._near_audio = audio
         self._near_certainty = certainty
         self._near_distance = distance
@@ -419,9 +411,22 @@ class _QueryGRPC(_BaseGRPC):
         self._metadata = return_metadata
         self.__merge_default_and_return_properties(return_properties)
 
-        return self.__call()
+        return self
 
-    def __call(self) -> SearchResponse:
+    @overload
+    def __call(self, mode: Literal["sync"]) -> SearchResponse:
+        ...
+
+    @overload
+    def __call(self, mode: Literal["async"]) -> grpc.aio.UnaryUnaryCall[Any, SearchResponse]:
+        ...
+
+    def __call(
+        self, mode: Literal["sync", "async"]
+    ) -> Union[SearchResponse, grpc.aio.UnaryUnaryCall[Any, SearchResponse]]:
+        stub = self._connection.grpc_stub()
+        assert stub is not None
+
         metadata: Optional[Tuple[Tuple[str, str], ...]] = None
         access_token = self._connection.get_current_bearer_token()
 
@@ -429,21 +434,24 @@ class _QueryGRPC(_BaseGRPC):
         if len(access_token) > 0:
             metadata_list.append(("authorization", access_token))
 
-        if len(self._connection.additional_headers):
-            for key, val in self._connection.additional_headers.items():
+        if len(self._connection._get_additional_headers()):
+            for key, val in self._connection._get_additional_headers().items():
                 if val is not None:
                     metadata_list.append((key.lower(), val))
 
         if len(metadata_list) > 0:
             metadata = tuple(metadata_list)
 
+        if mode == "sync":
+            call = stub.Search.with_call
+        elif mode == "async":
+            call = stub.Search
+        else:
+            raise ValueError(f"Unknown mode {mode}")
+
         try:
-            print(
-                self._translate_properties_from_python_to_grpc(self._default_props),
-            )
-            assert self._connection.grpc_stub is not None
-            res: SearchResponse  # According to PEP-0526
-            res, _ = self._connection.grpc_stub.Search.with_call(
+            assert self._connection.grpc_stub() is not None
+            return_ = call(
                 search_get_pb2.SearchRequest(
                     collection=self._name,
                     limit=self._limit,
@@ -529,10 +537,23 @@ class _QueryGRPC(_BaseGRPC):
                 metadata=metadata,
             )
 
-            return res
+            if mode == "sync":
+                out = cast(Tuple[SearchResponse, grpc.Call], return_)
+                return out[0]
+            elif mode == "async":
+                out = cast(grpc.aio.UnaryUnaryCall, return_)
+                return out
+            else:
+                raise ValueError(f"Unknown mode {mode}")
 
         except grpc.RpcError as e:
             raise WeaviateQueryException(e.details())
+
+    def sync(self) -> SearchResponse:
+        return self.__call("sync")
+
+    async def async_(self) -> grpc.aio.UnaryUnaryCall[Any, SearchResponse]:
+        return await self.__call("async")
 
     def _metadata_to_grpc(self, metadata: MetadataQuery) -> search_get_pb2.MetadataRequest:
         return search_get_pb2.MetadataRequest(

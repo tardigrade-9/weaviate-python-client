@@ -1,4 +1,5 @@
 import pytest as pytest
+import pytest_asyncio
 
 import weaviate
 from weaviate.collections.classes.config import (
@@ -25,42 +26,94 @@ def client():
     client.collections.delete_all()
 
 
-def test_collection_list(client: weaviate.WeaviateClient):
-    client.collections.create(
-        name="TestCollectionList",
-        vectorizer_config=Configure.Vectorizer.none(),
-        properties=[
-            Property(name="name", data_type=DataType.TEXT),
-            Property(name="age", data_type=DataType.INT),
-        ],
+@pytest_asyncio.fixture(scope="function")
+async def aclient():
+    client = weaviate.WeaviateAsyncClient(
+        weaviate.ConnectionParams.from_url("http://localhost:8087")
     )
-
-    collections = client.collections.list_all()
-    assert list(collections.keys()) == ["TestCollectionList"]
-    assert isinstance(collections["TestCollectionList"], _CollectionConfigSimple)
-
-    collection = client.collections.list_all(False)
-    assert list(collection.keys()) == ["TestCollectionList"]
-    assert isinstance(collection["TestCollectionList"], _CollectionConfig)
-
-    client.collections.delete("TestCollectionList")
+    async with client as client:
+        await client.collections.delete_all()
+        yield client
 
 
-def test_collection_get_simple(client: weaviate.WeaviateClient):
-    client.collections.create(
-        name="TestCollectionGetSimple",
-        vectorizer_config=Configure.Vectorizer.none(),
-        properties=[
-            Property(name="name", data_type=DataType.TEXT),
-            Property(name="age", data_type=DataType.INT),
-        ],
-    )
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_collection_list(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
+    if is_sync:
+        col = client.collections.create(
+            name="TestCollectionList",
+            vectorizer_config=Configure.Vectorizer.none(),
+            properties=[
+                Property(name="name", data_type=DataType.TEXT),
+                Property(name="age", data_type=DataType.INT),
+            ],
+        )
 
-    collection = client.collections.get("TestCollectionGetSimple")
-    config = collection.config.get(True)
-    assert isinstance(config, _CollectionConfigSimple)
+        collections = client.collections.list_all()
+        assert list(collections.keys()) == ["TestCollectionList"]
+        assert isinstance(collections["TestCollectionList"], _CollectionConfigSimple)
 
-    client.collections.delete("TestCollectionGetSimple")
+        collection = client.collections.list_all(False)
+        assert list(collection.keys()) == ["TestCollectionList"]
+        assert isinstance(collection["TestCollectionList"], _CollectionConfig)
+
+        client.collections.delete("TestCollectionList")
+    else:
+        col = await aclient.collections.create(
+            name="TestCollectionList",
+            vectorizer_config=Configure.Vectorizer.none(),
+            properties=[
+                Property(name="name", data_type=DataType.TEXT),
+                Property(name="age", data_type=DataType.INT),
+            ],
+        )
+        assert col.name == "TestCollectionList"  # forces a block
+
+        collections = await aclient.collections.list_all()
+        assert list(collections.keys()) == ["TestCollectionList"]
+        assert isinstance(collections["TestCollectionList"], _CollectionConfigSimple)
+
+        collection = await aclient.collections.list_all(False)
+        assert list(collection.keys()) == ["TestCollectionList"]
+        assert isinstance(collection["TestCollectionList"], _CollectionConfig)
+
+        await aclient.collections.delete("TestCollectionList")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_collection_get_simple(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: True
+):
+    if is_sync:
+        client.collections.create(
+            name="TestCollectionGetSimple",
+            vectorizer_config=Configure.Vectorizer.none(),
+            properties=[
+                Property(name="name", data_type=DataType.TEXT),
+                Property(name="age", data_type=DataType.INT),
+            ],
+        )
+
+        collection = client.collections.get("TestCollectionGetSimple")
+        config = collection.config.get(True)
+        assert isinstance(config, _CollectionConfigSimple)
+
+        client.collections.delete("TestCollectionGetSimple")
+    else:
+        collection = await aclient.collections.create(
+            name="TestCollectionGetSimple",
+            vectorizer_config=Configure.Vectorizer.none(),
+            properties=[
+                Property(name="name", data_type=DataType.TEXT),
+                Property(name="age", data_type=DataType.INT),
+            ],
+        )
+        config = await collection.config.get(True)
+        assert isinstance(config, _CollectionConfigSimple)
+        await aclient.collections.delete("TestCollectionGetSimple")
 
 
 def test_collection_config_empty(client: weaviate.WeaviateClient):
@@ -288,74 +341,151 @@ def test_collection_config_full(client: weaviate.WeaviateClient):
     client.collections.delete("TestCollectionConfigFull")
 
 
-def test_collection_config_update(client: weaviate.WeaviateClient):
-    collection = client.collections.create(
-        name="TestCollectionConfigUpdate",
-        vectorizer_config=Configure.Vectorizer.none(),
-        properties=[
-            Property(name="name", data_type=DataType.TEXT),
-            Property(name="age", data_type=DataType.INT),
-        ],
-    )
-    config = collection.config.get()
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_collection_config_update(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
+    if is_sync:
+        collection = client.collections.create(
+            name="TestCollectionConfigUpdate",
+            vectorizer_config=Configure.Vectorizer.none(),
+            properties=[
+                Property(name="name", data_type=DataType.TEXT),
+                Property(name="age", data_type=DataType.INT),
+            ],
+        )
+        config = collection.config.get()
 
-    assert config.replication_config.factor == 1
+        assert config.replication_config.factor == 1
 
-    collection.config.update(
-        description="Test",
-        inverted_index_config=ConfigureUpdate.inverted_index(
-            bm25_b=0.8,
-            bm25_k1=1.25,
-            cleanup_interval_seconds=10,
-            stopwords_additions=["a"],
-            stopwords_preset=StopwordsPreset.EN,
-            stopwords_removals=["the"],
-        ),
-        replication_config=ConfigureUpdate.replication(factor=2),
-        vector_index_config=ConfigureUpdate.vector_index(
-            skip=True,
-            pq_bit_compression=True,
-            pq_centroids=128,
-            pq_enabled=True,
-            pq_encoder_type=PQEncoderType.TILE,
-            pq_encoder_distribution=PQEncoderDistribution.NORMAL,
-            pq_segments=4,
-            pq_training_limit=100001,
-            vector_cache_max_objects=2000000,
-        ),
-    )
+        collection.config.update(
+            description="Test",
+            inverted_index_config=ConfigureUpdate.inverted_index(
+                bm25_b=0.8,
+                bm25_k1=1.25,
+                cleanup_interval_seconds=10,
+                stopwords_additions=["a"],
+                stopwords_preset=StopwordsPreset.EN,
+                stopwords_removals=["the"],
+            ),
+            replication_config=ConfigureUpdate.replication(factor=2),
+            vector_index_config=ConfigureUpdate.vector_index(
+                skip=True,
+                pq_bit_compression=True,
+                pq_centroids=128,
+                pq_enabled=True,
+                pq_encoder_type=PQEncoderType.TILE,
+                pq_encoder_distribution=PQEncoderDistribution.NORMAL,
+                pq_segments=4,
+                pq_training_limit=100001,
+                vector_cache_max_objects=2000000,
+            ),
+        )
 
-    config = collection.config.get()
+        config = collection.config.get()
 
-    assert config.description == "Test"
+        assert config.description == "Test"
 
-    assert config.inverted_index_config.bm25.b == 0.8
-    assert config.inverted_index_config.bm25.k1 == 1.25
-    assert config.inverted_index_config.cleanup_interval_seconds == 10
-    # assert config.inverted_index_config.stopwords.additions is ["a"] # potential weaviate bug, this returns as None
-    assert config.inverted_index_config.stopwords.removals == ["the"]
+        assert config.inverted_index_config.bm25.b == 0.8
+        assert config.inverted_index_config.bm25.k1 == 1.25
+        assert config.inverted_index_config.cleanup_interval_seconds == 10
+        # assert config.inverted_index_config.stopwords.additions is ["a"] # potential weaviate bug, this returns as None
+        assert config.inverted_index_config.stopwords.removals == ["the"]
 
-    assert config.replication_config.factor == 2
+        assert config.replication_config.factor == 2
 
-    assert config.vector_index_config.cleanup_interval_seconds == 300
-    assert config.vector_index_config.distance_metric == VectorDistance.COSINE
-    assert config.vector_index_config.dynamic_ef_factor == 8
-    assert config.vector_index_config.dynamic_ef_max == 500
-    assert config.vector_index_config.dynamic_ef_min == 100
-    assert config.vector_index_config.ef == -1
-    assert config.vector_index_config.ef_construction == 128
-    assert config.vector_index_config.flat_search_cutoff == 40000
-    assert config.vector_index_config.max_connections == 64
-    assert config.vector_index_config.pq.bit_compression is True
-    assert config.vector_index_config.pq.centroids == 128
-    assert config.vector_index_config.pq.enabled is True
-    assert config.vector_index_config.pq.encoder.type_ == PQEncoderType.TILE
-    assert config.vector_index_config.pq.encoder.distribution == PQEncoderDistribution.NORMAL
-    assert config.vector_index_config.pq.segments == 4
-    assert config.vector_index_config.pq.training_limit == 100001
-    assert config.vector_index_config.skip is True
-    assert config.vector_index_config.vector_cache_max_objects == 2000000
+        assert config.vector_index_config.cleanup_interval_seconds == 300
+        assert config.vector_index_config.distance_metric == VectorDistance.COSINE
+        assert config.vector_index_config.dynamic_ef_factor == 8
+        assert config.vector_index_config.dynamic_ef_max == 500
+        assert config.vector_index_config.dynamic_ef_min == 100
+        assert config.vector_index_config.ef == -1
+        assert config.vector_index_config.ef_construction == 128
+        assert config.vector_index_config.flat_search_cutoff == 40000
+        assert config.vector_index_config.max_connections == 64
+        assert config.vector_index_config.pq.bit_compression is True
+        assert config.vector_index_config.pq.centroids == 128
+        assert config.vector_index_config.pq.enabled is True
+        assert config.vector_index_config.pq.encoder.type_ == PQEncoderType.TILE
+        assert config.vector_index_config.pq.encoder.distribution == PQEncoderDistribution.NORMAL
+        assert config.vector_index_config.pq.segments == 4
+        assert config.vector_index_config.pq.training_limit == 100001
+        assert config.vector_index_config.skip is True
+        assert config.vector_index_config.vector_cache_max_objects == 2000000
 
-    assert config.vector_index_type == _VectorIndexType.HNSW
+        assert config.vector_index_type == _VectorIndexType.HNSW
 
-    client.collections.delete("TestCollectionSchemaUpdate")
+        client.collections.delete("TestCollectionSchemaUpdate")
+    else:
+        collection = await aclient.collections.create(
+            name="TestCollectionConfigUpdate",
+            vectorizer_config=Configure.Vectorizer.none(),
+            properties=[
+                Property(name="name", data_type=DataType.TEXT),
+                Property(name="age", data_type=DataType.INT),
+            ],
+        )
+        config = await collection.config.get()
+
+        assert config.replication_config.factor == 1
+
+        done = await collection.config.update(
+            description="Test",
+            inverted_index_config=ConfigureUpdate.inverted_index(
+                bm25_b=0.8,
+                bm25_k1=1.25,
+                cleanup_interval_seconds=10,
+                stopwords_additions=["a"],
+                stopwords_preset=StopwordsPreset.EN,
+                stopwords_removals=["the"],
+            ),
+            replication_config=ConfigureUpdate.replication(factor=2),
+            vector_index_config=ConfigureUpdate.vector_index(
+                skip=True,
+                pq_bit_compression=True,
+                pq_centroids=128,
+                pq_enabled=True,
+                pq_encoder_type=PQEncoderType.TILE,
+                pq_encoder_distribution=PQEncoderDistribution.NORMAL,
+                pq_segments=4,
+                pq_training_limit=100001,
+                vector_cache_max_objects=2000000,
+            ),
+        )
+        assert done is None
+
+        config = await collection.config.get()
+
+        assert config.description == "Test"
+
+        assert config.inverted_index_config.bm25.b == 0.8
+        assert config.inverted_index_config.bm25.k1 == 1.25
+        assert config.inverted_index_config.cleanup_interval_seconds == 10
+        # assert config.inverted_index_config.stopwords.additions is ["a"] # potential weaviate bug, this returns as None
+        assert config.inverted_index_config.stopwords.removals == ["the"]
+
+        assert config.replication_config.factor == 2
+
+        assert config.vector_index_config.cleanup_interval_seconds == 300
+        assert config.vector_index_config.distance_metric == VectorDistance.COSINE
+        assert config.vector_index_config.dynamic_ef_factor == 8
+        assert config.vector_index_config.dynamic_ef_max == 500
+        assert config.vector_index_config.dynamic_ef_min == 100
+        assert config.vector_index_config.ef == -1
+        assert config.vector_index_config.ef_construction == 128
+        assert config.vector_index_config.flat_search_cutoff == 40000
+        assert config.vector_index_config.max_connections == 64
+        assert config.vector_index_config.pq.bit_compression is True
+        assert config.vector_index_config.pq.centroids == 128
+        assert config.vector_index_config.pq.enabled is True
+        assert config.vector_index_config.pq.encoder.type_ == PQEncoderType.TILE
+        assert config.vector_index_config.pq.encoder.distribution == PQEncoderDistribution.NORMAL
+        assert config.vector_index_config.pq.segments == 4
+        assert config.vector_index_config.pq.training_limit == 100001
+        assert config.vector_index_config.skip is True
+        assert config.vector_index_config.vector_cache_max_objects == 2000000
+
+        assert config.vector_index_type == _VectorIndexType.HNSW
+
+        await aclient.collections.delete("TestCollectionSchemaUpdate")

@@ -22,46 +22,79 @@ from weaviate.collections.classes.internal import _Object
 from weaviate.collections.classes.orm import Model
 from weaviate.collections.classes.types import TProperties
 
-from weaviate.collections.data import _DataCollection
+from weaviate.collections.data import _DataCollection, _DataCollectionAsync
 
 from weaviate.collections.grpc.query import SearchResult
 
-from weaviate.collections.queries.base import _Grpc
-from weaviate.collections.queries.bm25 import _BM25Generate, _BM25Query
-from weaviate.collections.queries.fetch_objects import _FetchObjectsGenerate, _FetchObjectsQuery
-from weaviate.collections.queries.hybrid import _HybridGenerate, _HybridQuery
+from weaviate.collections.queries.base import _Query
+from weaviate.collections.queries.bm25 import (
+    _BM25Generate,
+    _BM25GenerateAsync,
+    _BM25Query,
+    _BM25QueryAsync,
+)
+from weaviate.collections.queries.fetch_objects import (
+    _FetchObjectsGenerate,
+    _FetchObjectsGenerateAsync,
+    _FetchObjectsQuery,
+    _FetchObjectsQueryAsync,
+)
+from weaviate.collections.queries.hybrid import (
+    _HybridGenerate,
+    _HybridGenerateAsync,
+    _HybridQuery,
+    _HybridQueryAsync,
+)
 from weaviate.collections.queries.near_audio import (
     _NearAudioGenerate,
+    _NearAudioGenerateAsync,
     _NearAudioGroupBy,
+    _NearAudioGroupByAsync,
     _NearAudioQuery,
+    _NearAudioQueryAsync,
 )
 from weaviate.collections.queries.near_image import (
     _NearImageGenerate,
+    _NearImageGenerateAsync,
     _NearImageGroupBy,
+    _NearImageGroupByAsync,
     _NearImageQuery,
+    _NearImageQueryAsync,
 )
 from weaviate.collections.queries.near_object import (
     _NearObjectGenerate,
+    _NearObjectGenerateAsync,
     _NearObjectGroupBy,
+    _NearObjectGroupByAsync,
     _NearObjectQuery,
+    _NearObjectQueryAsync,
 )
 from weaviate.collections.queries.near_text import (
     _NearTextGenerate,
+    _NearTextGenerateAsync,
     _NearTextGroupBy,
+    _NearTextGroupByAsync,
     _NearTextQuery,
+    _NearTextQueryAsync,
 )
 from weaviate.collections.queries.near_vector import (
     _NearVectorGenerate,
+    _NearVectorGenerateAsync,
     _NearVectorGroupBy,
+    _NearVectorGroupByAsync,
     _NearVectorQuery,
+    _NearVectorQueryAsync,
 )
 from weaviate.collections.queries.near_video import (
     _NearVideoGenerate,
+    _NearVideoGenerateAsync,
     _NearVideoGroupBy,
+    _NearVideoGroupByAsync,
     _NearVideoQuery,
+    _NearVideoQueryAsync,
 )
 
-from weaviate.connect import Connection
+from weaviate.connect import Connection, ConnectionAsync
 from weaviate.types import UUID
 
 from proto.v1 import search_get_pb2
@@ -71,13 +104,13 @@ class _QueryCollection(
     Generic[TProperties],
     _BM25Query[TProperties],
     _FetchObjectsQuery[TProperties],
-    _HybridQuery,
-    _NearAudioQuery,
-    _NearImageQuery,
-    _NearObjectQuery,
-    _NearTextQuery,
-    _NearVectorQuery,
-    _NearVideoQuery,
+    _HybridQuery[TProperties],
+    _NearAudioQuery[TProperties],
+    _NearImageQuery[TProperties],
+    _NearObjectQuery[TProperties],
+    _NearTextQuery[TProperties],
+    _NearVectorQuery[TProperties],
+    _NearVideoQuery[TProperties],
 ):
     def __init__(
         self,
@@ -114,6 +147,53 @@ class _QueryCollection(
         return self.__data._json_to_object(ret)
 
 
+class _QueryCollectionAsync(
+    Generic[TProperties],
+    _BM25QueryAsync[TProperties],
+    _FetchObjectsQueryAsync[TProperties],
+    _HybridQueryAsync[TProperties],
+    _NearAudioQueryAsync[TProperties],
+    _NearImageQueryAsync[TProperties],
+    _NearObjectQueryAsync[TProperties],
+    _NearTextQueryAsync[TProperties],
+    _NearVectorQueryAsync[TProperties],
+    _NearVideoQueryAsync[TProperties],
+):
+    def __init__(
+        self,
+        connection: ConnectionAsync,
+        name: str,
+        rest_query: _DataCollectionAsync[TProperties],
+        consistency_level: Optional[ConsistencyLevel],
+        tenant: Optional[str],
+        type_: Optional[Type[TProperties]],
+    ):
+        super().__init__(connection, name, consistency_level, tenant, type_)
+        self.__data = rest_query
+
+    async def fetch_object_by_id(
+        self, uuid: UUID, include_vector: bool = False
+    ) -> Optional[_Object[TProperties]]:
+        """Retrieve an object from the server by its UUID.
+
+        Arguments:
+            `uuid`
+                The UUID of the object to retrieve, REQUIRED.
+            `include_vector`
+                Whether to include the vector in the returned object.
+
+        Raises:
+            `weaviate.exceptions.WeaviateQueryException`:
+                If the network connection to Weaviate fails.
+            `weaviate.exceptions.WeaviateInsertInvalidPropertyError`:
+                If a property is invalid. I.e., has name `id` or `vector`, which are reserved.
+        """
+        ret = await self.__data._get_by_id(uuid=uuid, include_vector=include_vector)
+        if ret is None:
+            return ret
+        return self.__data._json_to_object(ret)
+
+
 class _GenerateCollection(
     _BM25Generate,
     _FetchObjectsGenerate,
@@ -124,6 +204,20 @@ class _GenerateCollection(
     _NearTextGenerate,
     _NearVectorGenerate,
     _NearVideoGenerate,
+):
+    pass
+
+
+class _GenerateCollectionAsync(
+    _BM25GenerateAsync,
+    _FetchObjectsGenerateAsync,
+    _HybridGenerateAsync,
+    _NearAudioGenerateAsync,
+    _NearImageGenerateAsync,
+    _NearObjectGenerateAsync,
+    _NearTextGenerateAsync,
+    _NearVectorGenerateAsync,
+    _NearVideoGenerateAsync,
 ):
     pass
 
@@ -139,7 +233,18 @@ class _GroupByCollection(
     pass
 
 
-class _GrpcCollectionModel(Generic[Model], _Grpc[Any]):
+class _GroupByCollectionAsync(
+    _NearAudioGroupByAsync,
+    _NearImageGroupByAsync,
+    _NearObjectGroupByAsync,
+    _NearTextGroupByAsync,
+    _NearVectorGroupByAsync,
+    _NearVideoGroupByAsync,
+):
+    pass
+
+
+class _GrpcCollectionModel(Generic[Model], _Query[Any]):
     def __init__(
         self,
         connection: Connection,
@@ -208,6 +313,7 @@ class _GrpcCollectionModel(Generic[Model], _Grpc[Any]):
                 return_metadata=return_metadata,
                 return_properties=return_properties,
             )
+            .sync()
             .results
         ]
 
@@ -239,6 +345,7 @@ class _GrpcCollectionModel(Generic[Model], _Grpc[Any]):
                 return_metadata=return_metadata,
                 return_properties=return_properties,
             )
+            .sync()
             .results
         ]
 
@@ -264,6 +371,7 @@ class _GrpcCollectionModel(Generic[Model], _Grpc[Any]):
                 return_metadata=return_metadata,
                 return_properties=return_properties,
             )
+            .sync()
             .results
         ]
 
@@ -289,6 +397,7 @@ class _GrpcCollectionModel(Generic[Model], _Grpc[Any]):
                 return_metadata=return_metadata,
                 return_properties=return_properties,
             )
+            .sync()
             .results
         ]
 
@@ -314,6 +423,7 @@ class _GrpcCollectionModel(Generic[Model], _Grpc[Any]):
                 return_metadata=return_metadata,
                 return_properties=return_properties,
             )
+            .sync()
             .results
         ]
 
@@ -343,6 +453,7 @@ class _GrpcCollectionModel(Generic[Model], _Grpc[Any]):
                 return_metadata=return_metadata,
                 return_properties=return_properties,
             )
+            .sync()
             .results
         ]
 
@@ -368,6 +479,7 @@ class _GrpcCollectionModel(Generic[Model], _Grpc[Any]):
                 return_metadata=return_metadata,
                 return_properties=return_properties,
             )
+            .sync()
             .results
         ]
 
@@ -393,6 +505,7 @@ class _GrpcCollectionModel(Generic[Model], _Grpc[Any]):
                 return_metadata=return_metadata,
                 return_properties=return_properties,
             )
+            .sync()
             .results
         ]
 
@@ -418,5 +531,6 @@ class _GrpcCollectionModel(Generic[Model], _Grpc[Any]):
                 return_metadata=return_metadata,
                 return_properties=return_properties,
             )
+            .sync()
             .results
         ]

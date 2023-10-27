@@ -11,9 +11,11 @@ from enum import Enum, EnumMeta
 from pathlib import Path
 from typing import Union, Sequence, Any, Optional, List, Dict, Generator, Tuple, cast
 
+import httpx
 import requests
 import uuid as uuid_lib
 import validators  # type: ignore
+from httpx import DecodingError
 from requests.exceptions import JSONDecodeError
 
 from weaviate.exceptions import (
@@ -827,7 +829,7 @@ def _to_beacons(uuids: UUIDS, to_class: str = "") -> List[Dict[str, str]]:
 
 
 def _decode_json_response_dict(
-    response: requests.Response, location: str
+    response: Union[httpx.Response, requests.Response], location: str
 ) -> Optional[Dict[str, Any]]:
     if response is None:
         return None
@@ -836,14 +838,14 @@ def _decode_json_response_dict(
         try:
             json_response = cast(Dict[str, Any], response.json())
             return json_response
-        except JSONDecodeError:
+        except (DecodingError, JSONDecodeError):
             raise ResponseCannotBeDecodedException(location, response)
 
     raise UnexpectedStatusCodeException(location, response)
 
 
 def _decode_json_response_list(
-    response: requests.Response, location: str
+    response: Union[httpx.Response, requests.Response], location: str
 ) -> Optional[List[Dict[str, Any]]]:
     if response is None:
         return None
@@ -852,7 +854,7 @@ def _decode_json_response_list(
         try:
             json_response = response.json()
             return cast(list, json_response)
-        except JSONDecodeError:
+        except (DecodingError, JSONDecodeError):
             raise ResponseCannotBeDecodedException(location, response)
     raise UnexpectedStatusCodeException(location, response)
 

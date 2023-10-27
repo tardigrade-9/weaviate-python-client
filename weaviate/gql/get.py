@@ -1810,7 +1810,7 @@ class GetBuilder(GraphQL):
             If weaviate reports a none OK status.
         """
         grpc_enabled = (  # only implemented for some scenarios
-            self._connection.grpc_stub is not None
+            self._connection.grpc_stub() is not None
             and (
                 self._near_clause is None
                 or isinstance(self._near_clause, NearVector)
@@ -1837,7 +1837,7 @@ class GetBuilder(GraphQL):
                 metadata = (("authorization", access_token),)
 
             try:
-                res, _ = self._connection.grpc_stub.Search.with_call(  # type: ignore
+                res, _ = self._connection.grpc_stub().Search.with_call(  # type: ignore
                     search_get_pb2.SearchRequest(
                         collection=self._class_name,
                         limit=self._limit,

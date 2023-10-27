@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Type, TypedDict, Union
 
 import pytest
+import pytest_asyncio
 import weaviate
 
 from pydantic import BaseModel
@@ -14,14 +15,13 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
 from integration.constants import WEAVIATE_LOGO_OLD_ENCODED, WEAVIATE_LOGO_NEW_ENCODED
 from weaviate.collections.classes.batch import ErrorObject
 
-from weaviate.collections.collection import _Collection
+from weaviate.collections.collection import _Collection, _CollectionAsync
 from weaviate.collections.classes.config import (
     Configure,
     DataType,
     Property,
     ReferenceProperty,
     ReferencePropertyMultiTarget,
-    Vectorizer,
 )
 from weaviate.collections.classes.data import (
     DataObject,
@@ -37,7 +37,7 @@ from weaviate.collections.classes.grpc import (
 from weaviate.collections.classes.internal import Reference
 from weaviate.collections.classes.tenants import Tenant, TenantActivityStatus
 from weaviate.collections.classes.types import Properties
-from weaviate.collections.data import _Data
+from weaviate.collections.data.sync import _Data
 from weaviate.collections.iterator import ITERATOR_CACHE_SIZE
 from weaviate.exceptions import (
     InvalidDataModelException,
@@ -57,50 +57,105 @@ DATE2 = datetime.datetime.strptime("2013-02-10", "%Y-%m-%d").replace(tzinfo=date
 DATE3 = datetime.datetime.strptime("2019-06-10", "%Y-%m-%d").replace(tzinfo=datetime.timezone.utc)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def client():
     client = weaviate.connect_to_local()
     client.collections.delete_all()
     yield client
-    client.collections.delete_all()
 
 
-def test_create_get_and_delete(client: weaviate.WeaviateClient):
-    name = "TestCreateAndDeleteNoGeneric"
-    col = client.collections.create(
-        name=name,
-        properties=[Property(name="Name", data_type=DataType.TEXT)],
-        vectorizer_config=Configure.Vectorizer.none(),
+@pytest_asyncio.fixture(scope="function")
+async def aclient():
+    client = weaviate.WeaviateAsyncClient(
+        weaviate.ConnectionParams.from_url("http://localhost:8080", grpc_port=50051)
     )
-    assert client.collections.exists(name)
-    assert isinstance(col, _Collection)
-
-    col = client.collections.get(name)
-    assert isinstance(col, _Collection)
-
-    client.collections.delete(name)
-    assert not client.collections.exists(name)
+    try:
+        assert await client.connect()
+        await client.collections.delete_all()
+        yield client
+    finally:
+        await client.close()
 
 
-def test_delete_multiple(client: weaviate.WeaviateClient):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_create_get_and_delete(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
+    name = "TestCreateAndDeleteNoGeneric"
+    if is_sync:
+        col = client.collections.create(
+            name=name,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        assert client.collections.exists(name)
+        assert isinstance(col, _Collection)
+
+        col = client.collections.get(name)
+        assert isinstance(col, _Collection)
+
+        client.collections.delete(name)
+        assert not client.collections.exists(name)
+    else:
+        col = await aclient.collections.create(
+            name=name,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        assert await aclient.collections.exists(col.name)
+        assert isinstance(col, _CollectionAsync)
+
+        col = aclient.collections.get(name)
+        assert isinstance(col, _CollectionAsync)
+
+        done = await aclient.collections.delete(name)
+        assert done is None
+        assert not await aclient.collections.exists(name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_delete_multiple(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
     name1 = "TestDeleteMultiple1"
     name2 = "TestDeleteMultiple2"
-    client.collections.create(
-        name=name1,
-        properties=[Property(name="Name", data_type=DataType.TEXT)],
-        vectorizer_config=Configure.Vectorizer.none(),
-    )
-    client.collections.create(
-        name=name2,
-        properties=[Property(name="Name", data_type=DataType.TEXT)],
-        vectorizer_config=Configure.Vectorizer.none(),
-    )
-    assert client.collections.exists(name1)
-    assert client.collections.exists(name2)
+    if is_sync:
+        client.collections.create(
+            name=name1,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        client.collections.create(
+            name=name2,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        assert client.collections.exists(name1)
+        assert client.collections.exists(name2)
 
-    client.collections.delete([name1, name2])
-    assert not client.collections.exists(name1)
-    assert not client.collections.exists(name2)
+        client.collections.delete([name1, name2])
+        assert not client.collections.exists(name1)
+        assert not client.collections.exists(name2)
+    else:
+        col1 = await aclient.collections.create(
+            name=name1,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        col2 = await aclient.collections.create(
+            name=name2,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        assert await aclient.collections.exists(col1.name)
+        assert await aclient.collections.exists(col2.name)
+
+        done = await aclient.collections.delete([name1, name2])
+        assert done is None
+        assert not await aclient.collections.exists(name1)
+        assert not await aclient.collections.exists(name2)
 
 
 @pytest.mark.parametrize("use_typed_dict", [True, False])
@@ -182,14 +237,19 @@ def test_get_with_pydantic_dataclass_generic(client: weaviate.WeaviateClient):
     assert error.value.args[0] == WRONG_GENERIC_ERROR_MSG
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "which_generic",
     ["typed_dict", "dict", "none"],
 )
-def test_insert(client: weaviate.WeaviateClient, which_generic: str):
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_insert(
+    client: weaviate.WeaviateClient,
+    aclient: weaviate.WeaviateAsyncClient,
+    which_generic: str,
+    is_sync: bool,
+):
     name = "TestInsert"
-    client.collections.delete(name)
-
     create_args = {
         "name": name,
         "properties": [Property(name="Name", data_type=DataType.TEXT)],
@@ -200,37 +260,71 @@ def test_insert(client: weaviate.WeaviateClient, which_generic: str):
         name: str
 
     insert_data = {"name": "some name"}
-    if which_generic == "typed_dict":
-        client.collections.create(**create_args)
-        collection = client.collections.get(name, TestInsert)
-        uuid = collection.data.insert(properties=TestInsert(**insert_data))
-    elif which_generic == "dict":
-        client.collections.create(**create_args)
-        collection = client.collections.get(name, Dict[str, str])
-        uuid = collection.data.insert(properties=insert_data)
+    if is_sync:
+        if which_generic == "typed_dict":
+            client.collections.create(**create_args)
+            collection = client.collections.get(name, TestInsert)
+            uuid = collection.data.insert(properties=TestInsert(**insert_data))
+        elif which_generic == "dict":
+            client.collections.create(**create_args)
+            collection = client.collections.get(name, Dict[str, str])
+            uuid = collection.data.insert(properties=insert_data)
+        else:
+            collection = client.collections.create(**create_args)
+            uuid = collection.data.insert(properties=insert_data)
+        name = collection.query.fetch_object_by_id(uuid).properties["name"]
+        assert name == insert_data["name"]
     else:
-        collection = client.collections.create(**create_args)
-        uuid = collection.data.insert(properties=insert_data)
-    name = collection.query.fetch_object_by_id(uuid).properties["name"]
-    assert name == insert_data["name"]
+        if which_generic == "typed_dict":
+            await aclient.collections.create(**create_args)
+            collection = aclient.collections.get(name, TestInsert)
+            uuid = await collection.data.insert(properties=TestInsert(**insert_data))
+        elif which_generic == "dict":
+            await aclient.collections.create(**create_args)
+            collection = aclient.collections.get(name, Dict[str, str])
+            uuid = await collection.data.insert(properties=insert_data)
+        else:
+            collection = await aclient.collections.create(**create_args)
+            uuid = await collection.data.insert(properties=insert_data)
+        name = (await collection.query.fetch_object_by_id(uuid)).properties["name"]
+        assert name == insert_data["name"]
 
 
-def test_delete_by_id(client: weaviate.WeaviateClient):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_delete_by_id(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
     name = "TestDeleteById"
-    collection = client.collections.create(
-        name=name,
-        properties=[Property(name="Name", data_type=DataType.TEXT)],
-        vectorizer_config=Configure.Vectorizer.none(),
-    )
+    if is_sync:
+        collection = client.collections.create(
+            name=name,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
 
-    uuid = collection.data.insert(properties={"name": "some name"})
-    assert collection.query.fetch_object_by_id(uuid) is not None
-    collection.data.delete_by_id(uuid)
-    assert collection.query.fetch_object_by_id(uuid) is None
+        uuid = collection.data.insert(properties={"name": "some name"})
+        assert collection.query.fetch_object_by_id(uuid) is not None
+        collection.data.delete_by_id(uuid)
+        assert collection.query.fetch_object_by_id(uuid) is None
 
-    client.collections.delete(name)
+        client.collections.delete(name)
+    else:
+        collection = await aclient.collections.create(
+            name=name,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+
+        uuid = await collection.data.insert(properties={"name": "some name"})
+        assert (await collection.query.fetch_object_by_id(uuid)) is not None
+        await collection.data.delete_by_id(uuid)
+        assert (await collection.query.fetch_object_by_id(uuid)) is None
+
+        await aclient.collections.delete(name)
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "objects,should_error",
     [
@@ -285,34 +379,59 @@ def test_delete_by_id(client: weaviate.WeaviateClient):
         ),
     ],
 )
-def test_insert_many(
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_insert_many(
     client: weaviate.WeaviateClient,
+    aclient: weaviate.WeaviateAsyncClient,
     objects: List[Union[Properties, DataObject[Properties]]],
     should_error: bool,
+    is_sync: bool,
 ):
     name = "TestInsertMany"
-    client.collections.delete(name)
-    collection = client.collections.create(
-        name=name,
-        properties=[Property(name="Name", data_type=DataType.TEXT)],
-        vectorizer_config=Configure.Vectorizer.none(),
-    )
-    if not should_error:
-        ret = collection.data.insert_many(objects)
-        for idx, uuid_ in ret.uuids.items():
-            obj1 = collection.query.fetch_object_by_id(uuid_)
+    if is_sync:
+        collection = client.collections.create(
+            name=name,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        if not should_error:
+            ret = collection.data.insert_many(objects)
+            for idx, uuid_ in ret.uuids.items():
+                obj1 = collection.query.fetch_object_by_id(uuid_)
+                assert (
+                    obj1.properties["name"] == objects[idx].properties["name"]
+                    if isinstance(objects[idx], DataObject)
+                    else objects[idx]["name"]
+                )
+        else:
+            with pytest.raises(WeaviateInsertInvalidPropertyError) as e:
+                collection.data.insert_many(objects)
             assert (
-                obj1.properties["name"] == objects[idx].properties["name"]
-                if isinstance(objects[idx], DataObject)
-                else objects[idx]["name"]
+                e.value.message
+                == f"""It is forbidden to insert `id` or `vector` inside properties: {objects[0]}. Only properties defined in your collection's config can be insterted as properties of the object, `id` is totally forbidden as it is reserved and `vector` is forbidden at this level. You should use the `DataObject` class if you wish to insert an object with a custom `vector` whilst inserting its properties."""
             )
     else:
-        with pytest.raises(WeaviateInsertInvalidPropertyError) as e:
-            collection.data.insert_many(objects)
-        assert (
-            e.value.message
-            == f"""It is forbidden to insert `id` or `vector` inside properties: {objects[0]}. Only properties defined in your collection's config can be insterted as properties of the object, `id` is totally forbidden as it is reserved and `vector` is forbidden at this level. You should use the `DataObject` class if you wish to insert an object with a custom `vector` whilst inserting its properties."""
+        collection = await aclient.collections.create(
+            name=name,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
         )
+        if not should_error:
+            ret = await collection.data.insert_many(objects)
+            for idx, uuid_ in ret.uuids.items():
+                obj1 = await collection.query.fetch_object_by_id(uuid_)
+                assert (
+                    obj1.properties["name"] == objects[idx].properties["name"]
+                    if isinstance(objects[idx], DataObject)
+                    else objects[idx]["name"]
+                )
+        else:
+            with pytest.raises(WeaviateInsertInvalidPropertyError) as e:
+                await collection.data.insert_many(objects)
+            assert (
+                e.value.message
+                == f"""It is forbidden to insert `id` or `vector` inside properties: {objects[0]}. Only properties defined in your collection's config can be insterted as properties of the object, `id` is totally forbidden as it is reserved and `vector` is forbidden at this level. You should use the `DataObject` class if you wish to insert an object with a custom `vector` whilst inserting its properties."""
+            )
 
 
 def test_insert_many_with_typed_dict(client: weaviate.WeaviateClient):
@@ -343,139 +462,304 @@ def test_insert_many_with_typed_dict(client: weaviate.WeaviateClient):
     client.collections.delete(name)
 
 
-def test_insert_many_with_refs(client: weaviate.WeaviateClient):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_insert_many_with_refs(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
     name_target = "RefClassBatchTarget"
-    client.collections.delete(name_target)
+    if is_sync:
+        ref_collection = client.collections.create(
+            name=name_target,
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        uuid_to1 = ref_collection.data.insert(properties={})
+        uuid_to2 = ref_collection.data.insert(properties={})
 
-    ref_collection = client.collections.create(
-        name=name_target,
-        vectorizer_config=Configure.Vectorizer.none(),
-    )
-    uuid_to1 = ref_collection.data.insert(properties={})
-    uuid_to2 = ref_collection.data.insert(properties={})
+        name = "TestInsertManyRefs"
+        client.collections.delete(name)
 
-    name = "TestInsertManyRefs"
-    client.collections.delete(name)
+        collection = client.collections.create(
+            name=name,
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+                ReferenceProperty(name="ref_single", target_collection=name_target),
+                ReferencePropertyMultiTarget(
+                    name="ref_many", target_collections=[name_target, name]
+                ),
+            ],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        uuid_from = collection.data.insert(properties={"name": "first"})
 
-    collection = client.collections.create(
-        name=name,
-        properties=[
-            Property(name="Name", data_type=DataType.TEXT),
-            ReferenceProperty(name="ref_single", target_collection=name_target),
-            ReferencePropertyMultiTarget(name="ref_many", target_collections=[name_target, name]),
-        ],
-        vectorizer_config=Configure.Vectorizer.none(),
-    )
-    uuid_from = collection.data.insert(properties={"name": "first"})
+        ret = collection.data.insert_many(
+            [
+                DataObject(
+                    properties={
+                        "name": "some name",
+                        "ref_single": Reference.to(uuids=[uuid_to1, uuid_to2]),
+                        "ref_many": Reference.to_multi_target(
+                            uuids=uuid_from, target_collection=collection
+                        ),
+                    },
+                    vector=[1, 2, 3],
+                ),
+                DataObject(
+                    properties={
+                        "name": "some other name",
+                        "ref_single": Reference.to(uuids=uuid_to2),
+                        "ref_many": Reference.to_multi_target(
+                            uuids=uuid_to1, target_collection=name_target
+                        ),
+                    },
+                    uuid=uuid.uuid4(),
+                ),
+            ]
+        )
+        obj1 = collection.query.fetch_object_by_id(ret.uuids[0])
+        assert obj1.properties["name"] == "some name"
+        assert (
+            obj1.properties["ref_single"][0]["beacon"]
+            == BEACON_START + f"/{name_target}/{uuid_to1}"
+        )
+        assert (
+            obj1.properties["ref_single"][1]["beacon"]
+            == BEACON_START + f"/{name_target}/{uuid_to2}"
+        )
+        assert obj1.properties["ref_many"][0]["beacon"] == BEACON_START + f"/{name}/{uuid_from}"
 
-    ret = collection.data.insert_many(
-        [
-            DataObject(
-                properties={
-                    "name": "some name",
-                    "ref_single": Reference.to(uuids=[uuid_to1, uuid_to2]),
-                    "ref_many": Reference.to_multi_target(
-                        uuids=uuid_from, target_collection=collection
-                    ),
-                },
-                vector=[1, 2, 3],
-            ),
-            DataObject(
-                properties={
-                    "name": "some other name",
-                    "ref_single": Reference.to(uuids=uuid_to2),
-                    "ref_many": Reference.to_multi_target(
-                        uuids=uuid_to1, target_collection=name_target
-                    ),
-                },
-                uuid=uuid.uuid4(),
-            ),
-        ]
-    )
-    obj1 = collection.query.fetch_object_by_id(ret.uuids[0])
-    assert obj1.properties["name"] == "some name"
-    assert obj1.properties["ref_single"][0]["beacon"] == BEACON_START + f"/{name_target}/{uuid_to1}"
-    assert obj1.properties["ref_single"][1]["beacon"] == BEACON_START + f"/{name_target}/{uuid_to2}"
-    assert obj1.properties["ref_many"][0]["beacon"] == BEACON_START + f"/{name}/{uuid_from}"
+        obj1 = collection.query.fetch_object_by_id(ret.uuids[1])
+        assert obj1.properties["name"] == "some other name"
+        assert (
+            obj1.properties["ref_single"][0]["beacon"]
+            == BEACON_START + f"/{name_target}/{uuid_to2}"
+        )
+        assert (
+            obj1.properties["ref_many"][0]["beacon"] == BEACON_START + f"/{name_target}/{uuid_to1}"
+        )
+    else:
+        ref_collection = await aclient.collections.create(
+            name=name_target,
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        uuid_to1 = await ref_collection.data.insert(properties={})
+        uuid_to2 = await ref_collection.data.insert(properties={})
 
-    obj1 = collection.query.fetch_object_by_id(ret.uuids[1])
-    assert obj1.properties["name"] == "some other name"
-    assert obj1.properties["ref_single"][0]["beacon"] == BEACON_START + f"/{name_target}/{uuid_to2}"
-    assert obj1.properties["ref_many"][0]["beacon"] == BEACON_START + f"/{name_target}/{uuid_to1}"
+        name = "TestInsertManyRefs"
+        await aclient.collections.delete(name)
+
+        collection = await aclient.collections.create(
+            name=name,
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+                ReferenceProperty(name="ref_single", target_collection=name_target),
+                ReferencePropertyMultiTarget(
+                    name="ref_many", target_collections=[name_target, name]
+                ),
+            ],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        uuid_from = await collection.data.insert(properties={"name": "first"})
+
+        ret = await collection.data.insert_many(
+            [
+                DataObject(
+                    properties={
+                        "name": "some name",
+                        "ref_single": Reference.to(uuids=[uuid_to1, uuid_to2]),
+                        "ref_many": Reference.to_multi_target(
+                            uuids=uuid_from, target_collection=collection
+                        ),
+                    },
+                    vector=[1, 2, 3],
+                ),
+                DataObject(
+                    properties={
+                        "name": "some other name",
+                        "ref_single": Reference.to(uuids=uuid_to2),
+                        "ref_many": Reference.to_multi_target(
+                            uuids=uuid_to1, target_collection=name_target
+                        ),
+                    },
+                    uuid=uuid.uuid4(),
+                ),
+            ]
+        )
+        obj1 = await collection.query.fetch_object_by_id(ret.uuids[0])
+        assert obj1.properties["name"] == "some name"
+        assert (
+            obj1.properties["ref_single"][0]["beacon"]
+            == BEACON_START + f"/{name_target}/{uuid_to1}"
+        )
+        assert (
+            obj1.properties["ref_single"][1]["beacon"]
+            == BEACON_START + f"/{name_target}/{uuid_to2}"
+        )
+        assert obj1.properties["ref_many"][0]["beacon"] == BEACON_START + f"/{name}/{uuid_from}"
+
+        obj1 = await collection.query.fetch_object_by_id(ret.uuids[1])
+        assert obj1.properties["name"] == "some other name"
+        assert (
+            obj1.properties["ref_single"][0]["beacon"]
+            == BEACON_START + f"/{name_target}/{uuid_to2}"
+        )
+        assert (
+            obj1.properties["ref_many"][0]["beacon"] == BEACON_START + f"/{name_target}/{uuid_to1}"
+        )
 
 
-def test_insert_many_error(client: weaviate.WeaviateClient):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_insert_many_error(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
     name = "TestInsertManyWitHError"
-    collection = client.collections.create(
-        name=name,
-        properties=[Property(name="Name", data_type=DataType.TEXT)],
-        vectorizer_config=Configure.Vectorizer.none(),
-    )
-    ret = collection.data.insert_many(
-        [
-            DataObject(properties={"wrong_name": "some name"}, vector=[1, 2, 3]),
-            DataObject(properties={"name": "some other name"}, uuid=uuid.uuid4()),
-            DataObject(properties={"other_thing": "is_wrong"}, vector=[1, 2, 3]),
-        ]
-    )
-    assert ret.has_errors
+    if is_sync:
+        collection = client.collections.create(
+            name=name,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        ret = collection.data.insert_many(
+            [
+                DataObject(properties={"wrong_name": "some name"}, vector=[1, 2, 3]),
+                DataObject(properties={"name": "some other name"}, uuid=uuid.uuid4()),
+                DataObject(properties={"other_thing": "is_wrong"}, vector=[1, 2, 3]),
+            ]
+        )
+        assert ret.has_errors
 
-    obj = collection.query.fetch_object_by_id(ret.uuids[1])
-    assert obj.properties["name"] == "some other name"
+        obj = collection.query.fetch_object_by_id(ret.uuids[1])
+        assert obj.properties["name"] == "some other name"
 
-    assert len(ret.errors) == 2
-    assert 0 in ret.errors and 2 in ret.errors
+        assert len(ret.errors) == 2
+        assert 0 in ret.errors and 2 in ret.errors
 
-    assert isinstance(ret.all_responses[0], ErrorObject) and isinstance(
-        ret.all_responses[2], ErrorObject
-    )
-    assert isinstance(ret.all_responses[1], uuid.UUID)
+        assert isinstance(ret.all_responses[0], ErrorObject) and isinstance(
+            ret.all_responses[2], ErrorObject
+        )
+        assert isinstance(ret.all_responses[1], uuid.UUID)
 
-    client.collections.delete(name)
+        client.collections.delete(name)
+    else:
+        collection = await aclient.collections.create(
+            name=name,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        ret = await collection.data.insert_many(
+            [
+                DataObject(properties={"wrong_name": "some name"}, vector=[1, 2, 3]),
+                DataObject(properties={"name": "some other name"}, uuid=uuid.uuid4()),
+                DataObject(properties={"other_thing": "is_wrong"}, vector=[1, 2, 3]),
+            ]
+        )
+        assert ret.has_errors
+
+        obj = await collection.query.fetch_object_by_id(ret.uuids[1])
+        assert obj.properties["name"] == "some other name"
+
+        assert len(ret.errors) == 2
+        assert 0 in ret.errors and 2 in ret.errors
+
+        assert isinstance(ret.all_responses[0], ErrorObject) and isinstance(
+            ret.all_responses[2], ErrorObject
+        )
+        assert isinstance(ret.all_responses[1], uuid.UUID)
+
+        await aclient.collections.delete(name)
 
 
-def test_insert_many_with_tenant(client: weaviate.WeaviateClient):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_insert_many_with_tenant(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
     name = "TestInsertManyWithTenant"
-    collection = client.collections.create(
-        name=name,
-        properties=[Property(name="Name", data_type=DataType.TEXT)],
-        vectorizer_config=Configure.Vectorizer.none(),
-        multi_tenancy_config=Configure.multi_tenancy(enabled=True),
-    )
+    if is_sync:
+        collection = client.collections.create(
+            name=name,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+            multi_tenancy_config=Configure.multi_tenancy(enabled=True),
+        )
 
-    collection.tenants.create([Tenant(name="tenant1"), Tenant(name="tenant2")])
-    tenant1 = collection.with_tenant("tenant1")
-    tenant2 = collection.with_tenant("tenant2")
+        collection.tenants.create([Tenant(name="tenant1"), Tenant(name="tenant2")])
+        tenant1 = collection.with_tenant("tenant1")
+        tenant2 = collection.with_tenant("tenant2")
 
-    ret = tenant1.data.insert_many(
-        [
-            DataObject(properties={"name": "some name"}, vector=[1, 2, 3]),
-            DataObject(properties={"name": "some other name"}, uuid=uuid.uuid4()),
-        ]
-    )
-    assert not ret.has_errors
-    obj1 = tenant1.query.fetch_object_by_id(ret.uuids[0])
-    obj2 = tenant1.query.fetch_object_by_id(ret.uuids[1])
-    assert obj1.properties["name"] == "some name"
-    assert obj2.properties["name"] == "some other name"
-    assert tenant2.query.fetch_object_by_id(ret.uuids[0]) is None
-    assert tenant2.query.fetch_object_by_id(ret.uuids[1]) is None
+        ret = tenant1.data.insert_many(
+            [
+                DataObject(properties={"name": "some name"}, vector=[1, 2, 3]),
+                DataObject(properties={"name": "some other name"}, uuid=uuid.uuid4()),
+            ]
+        )
+        assert not ret.has_errors
+        obj1 = tenant1.query.fetch_object_by_id(ret.uuids[0])
+        obj2 = tenant1.query.fetch_object_by_id(ret.uuids[1])
+        assert obj1.properties["name"] == "some name"
+        assert obj2.properties["name"] == "some other name"
+        assert tenant2.query.fetch_object_by_id(ret.uuids[0]) is None
+        assert tenant2.query.fetch_object_by_id(ret.uuids[1]) is None
 
-    client.collections.delete(name)
+        client.collections.delete(name)
+    else:
+        collection = await aclient.collections.create(
+            name=name,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+            multi_tenancy_config=Configure.multi_tenancy(enabled=True),
+        )
+
+        await collection.tenants.create([Tenant(name="tenant1"), Tenant(name="tenant2")])
+        tenant1 = collection.with_tenant("tenant1")
+        tenant2 = collection.with_tenant("tenant2")
+
+        ret = await tenant1.data.insert_many(
+            [
+                DataObject(properties={"name": "some name"}, vector=[1, 2, 3]),
+                DataObject(properties={"name": "some other name"}, uuid=uuid.uuid4()),
+            ]
+        )
+        assert not ret.has_errors
+        obj1 = await tenant1.query.fetch_object_by_id(ret.uuids[0])
+        obj2 = await tenant1.query.fetch_object_by_id(ret.uuids[1])
+        assert obj1.properties["name"] == "some name"
+        assert obj2.properties["name"] == "some other name"
+        assert await tenant2.query.fetch_object_by_id(ret.uuids[0]) is None
+        assert await tenant2.query.fetch_object_by_id(ret.uuids[1]) is None
+
+        await aclient.collections.delete(name)
 
 
-def test_replace(client: weaviate.WeaviateClient):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_replace(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
     name = "TestReplace"
-    collection = client.collections.create(
-        name=name,
-        properties=[Property(name="Name", data_type=DataType.TEXT)],
-        vectorizer_config=Configure.Vectorizer.none(),
-    )
-    uuid = collection.data.insert(properties={"name": "some name"})
-    collection.data.replace(properties={"name": "other name"}, uuid=uuid)
-    assert collection.query.fetch_object_by_id(uuid).properties["name"] == "other name"
+    if is_sync:
+        collection = client.collections.create(
+            name=name,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        uuid = collection.data.insert(properties={"name": "some name"})
+        collection.data.replace(properties={"name": "other name"}, uuid=uuid)
+        assert collection.query.fetch_object_by_id(uuid).properties["name"] == "other name"
 
-    client.collections.delete(name)
+        client.collections.delete(name)
+    else:
+        collection = await aclient.collections.create(
+            name=name,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        uuid = await collection.data.insert(properties={"name": "some name"})
+        await collection.data.replace(properties={"name": "other name"}, uuid=uuid)
+        assert (await collection.query.fetch_object_by_id(uuid)).properties["name"] == "other name"
+
+        await aclient.collections.delete(name)
 
 
 def test_replace_overwrites_vector(client: weaviate.WeaviateClient):
@@ -498,25 +782,48 @@ def test_replace_overwrites_vector(client: weaviate.WeaviateClient):
     client.collections.delete(name)
 
 
-def test_replace_with_tenant(client: weaviate.WeaviateClient):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_replace_with_tenant(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
     name = "TestReplaceWithTenant"
-    collection = client.collections.create(
-        name=name,
-        properties=[Property(name="Name", data_type=DataType.TEXT)],
-        vectorizer_config=Configure.Vectorizer.none(),
-        multi_tenancy_config=Configure.multi_tenancy(enabled=True),
-    )
+    if is_sync:
+        collection = client.collections.create(
+            name=name,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+            multi_tenancy_config=Configure.multi_tenancy(enabled=True),
+        )
 
-    collection.tenants.create([Tenant(name="tenant1"), Tenant(name="tenant2")])
-    tenant1 = collection.with_tenant("tenant1")
-    tenant2 = collection.with_tenant("tenant2")
+        collection.tenants.create([Tenant(name="tenant1"), Tenant(name="tenant2")])
+        tenant1 = collection.with_tenant("tenant1")
+        tenant2 = collection.with_tenant("tenant2")
 
-    uuid = tenant1.data.insert(properties={"name": "some name"})
-    tenant1.data.replace(properties={"name": "other name"}, uuid=uuid)
-    assert tenant1.query.fetch_object_by_id(uuid).properties["name"] == "other name"
-    assert tenant2.query.fetch_object_by_id(uuid) is None
+        uuid = tenant1.data.insert(properties={"name": "some name"})
+        tenant1.data.replace(properties={"name": "other name"}, uuid=uuid)
+        assert tenant1.query.fetch_object_by_id(uuid).properties["name"] == "other name"
+        assert tenant2.query.fetch_object_by_id(uuid) is None
 
-    client.collections.delete(name)
+        client.collections.delete(name)
+    else:
+        collection = await aclient.collections.create(
+            name=name,
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+            multi_tenancy_config=Configure.multi_tenancy(enabled=True),
+        )
+
+        await collection.tenants.create([Tenant(name="tenant1"), Tenant(name="tenant2")])
+        tenant1 = collection.with_tenant("tenant1")
+        tenant2 = collection.with_tenant("tenant2")
+
+        uuid = await tenant1.data.insert(properties={"name": "some name"})
+        await tenant1.data.replace(properties={"name": "other name"}, uuid=uuid)
+        assert (await tenant1.query.fetch_object_by_id(uuid)).properties["name"] == "other name"
+        assert await tenant2.query.fetch_object_by_id(uuid) is None
+
+        await aclient.collections.delete(name)
 
 
 def test_update(client: weaviate.WeaviateClient):
@@ -580,18 +887,39 @@ def test_types(client: weaviate.WeaviateClient, data_type: DataType, value):
     client.collections.delete("Something")
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("fusion_type", [HybridFusion.RANKED, HybridFusion.RELATIVE_SCORE])
-def test_search_hybrid(client: weaviate.WeaviateClient, fusion_type):
-    collection = client.collections.create(
-        name="Testing",
-        properties=[Property(name="Name", data_type=DataType.TEXT)],
-        vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
-    )
-    collection.data.insert({"Name": "some name"}, uuid.uuid4())
-    collection.data.insert({"Name": "other word"}, uuid.uuid4())
-    objs = collection.query.hybrid(alpha=0, query="name", fusion_type=fusion_type).objects
-    assert len(objs) == 1
-    client.collections.delete("Testing")
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_search_hybrid(
+    client: weaviate.WeaviateClient,
+    aclient: weaviate.WeaviateAsyncClient,
+    fusion_type: HybridFusion,
+    is_sync: bool,
+):
+    if is_sync:
+        collection = client.collections.create(
+            name="Testing",
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
+        )
+        collection.data.insert({"Name": "some name"}, uuid.uuid4())
+        collection.data.insert({"Name": "other word"}, uuid.uuid4())
+        objs = collection.query.hybrid(alpha=0, query="name", fusion_type=fusion_type).objects
+        assert len(objs) == 1
+        client.collections.delete("Testing")
+    else:
+        collection = await aclient.collections.create(
+            name="Testing",
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
+        )
+        await collection.data.insert({"Name": "some name"}, uuid.uuid4())
+        await collection.data.insert({"Name": "other word"}, uuid.uuid4())
+        objs = (
+            await collection.query.hybrid(alpha=0, query="name", fusion_type=fusion_type)
+        ).objects
+        assert len(objs) == 1
+        await aclient.collections.delete("Testing")
 
 
 @pytest.mark.parametrize("limit", [1, 5])
@@ -678,185 +1006,400 @@ def test_auto_limit(client: weaviate.WeaviateClient):
     client.collections.delete("TestAutoLimit")
 
 
-def test_query_properties(client: weaviate.WeaviateClient):
-    collection = client.collections.create(
-        name="TestQueryProperties",
-        properties=[
-            Property(name="Name", data_type=DataType.TEXT),
-            Property(name="Age", data_type=DataType.INT),
-        ],
-        vectorizer_config=Configure.Vectorizer.none(),
-    )
-    collection.data.insert({"Name": "rain", "Age": 1})
-    collection.data.insert({"Name": "sun", "Age": 2})
-    collection.data.insert({"Name": "cloud", "Age": 3})
-    collection.data.insert({"Name": "snow", "Age": 4})
-    collection.data.insert({"Name": "hail", "Age": 5})
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_query_properties(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
+    if is_sync:
+        collection = client.collections.create(
+            name="TestQueryProperties",
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+                Property(name="Age", data_type=DataType.INT),
+            ],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        collection.data.insert({"Name": "rain", "Age": 1})
+        collection.data.insert({"Name": "sun", "Age": 2})
+        collection.data.insert({"Name": "cloud", "Age": 3})
+        collection.data.insert({"Name": "snow", "Age": 4})
+        collection.data.insert({"Name": "hail", "Age": 5})
 
-    objects = collection.query.bm25(query="rain", query_properties=["name"]).objects
-    assert len(objects) == 1
-    assert objects[0].properties["age"] == 1
+        objects = collection.query.bm25(query="rain", query_properties=["name"]).objects
+        assert len(objects) == 1
+        assert objects[0].properties["age"] == 1
 
-    objects = collection.query.bm25(query="sleet", query_properties=["name"]).objects
-    assert len(objects) == 0
+        objects = collection.query.bm25(query="sleet", query_properties=["name"]).objects
+        assert len(objects) == 0
 
-    objects = collection.query.hybrid(query="cloud", query_properties=["name"], alpha=0).objects
-    assert len(objects) == 1
-    assert objects[0].properties["age"] == 3
+        objects = collection.query.hybrid(query="cloud", query_properties=["name"], alpha=0).objects
+        assert len(objects) == 1
+        assert objects[0].properties["age"] == 3
 
-    objects = collection.query.hybrid(query="sleet", query_properties=["name"], alpha=0).objects
-    assert len(objects) == 0
+        objects = collection.query.hybrid(query="sleet", query_properties=["name"], alpha=0).objects
+        assert len(objects) == 0
 
-    client.collections.delete("TestQueryProperties")
+        client.collections.delete("TestQueryProperties")
+    else:
+        collection = await aclient.collections.create(
+            name="TestQueryProperties",
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+                Property(name="Age", data_type=DataType.INT),
+            ],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+        await collection.data.insert({"Name": "rain", "Age": 1})
+        await collection.data.insert({"Name": "sun", "Age": 2})
+        await collection.data.insert({"Name": "cloud", "Age": 3})
+        await collection.data.insert({"Name": "snow", "Age": 4})
+        await collection.data.insert({"Name": "hail", "Age": 5})
 
+        objects = (await collection.query.bm25(query="rain", query_properties=["name"])).objects
+        assert len(objects) == 1
+        assert objects[0].properties["age"] == 1
 
-def test_near_vector(client: weaviate.WeaviateClient):
-    collection = client.collections.create(
-        name="TestNearVector",
-        properties=[Property(name="Name", data_type=DataType.TEXT)],
-        vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
-    )
-    uuid_banana = collection.data.insert({"Name": "Banana"})
-    collection.data.insert({"Name": "Fruit"})
-    collection.data.insert({"Name": "car"})
-    collection.data.insert({"Name": "Mountain"})
+        objects = (await collection.query.bm25(query="sleet", query_properties=["name"])).objects
+        assert len(objects) == 0
 
-    banana = collection.query.fetch_object_by_id(uuid_banana, include_vector=True)
+        objects = (
+            await collection.query.hybrid(query="cloud", query_properties=["name"], alpha=0)
+        ).objects
+        assert len(objects) == 1
+        assert objects[0].properties["age"] == 3
 
-    full_objects = collection.query.near_vector(
-        banana.metadata.vector, return_metadata=MetadataQuery(distance=True, certainty=True)
-    ).objects
-    assert len(full_objects) == 4
+        objects = (
+            await collection.query.hybrid(query="sleet", query_properties=["name"], alpha=0)
+        ).objects
+        assert len(objects) == 0
 
-    objects_distance = collection.query.near_vector(
-        banana.metadata.vector, distance=full_objects[2].metadata.distance
-    ).objects
-    assert len(objects_distance) == 3
-
-    objects_distance = collection.query.near_vector(
-        banana.metadata.vector, certainty=full_objects[2].metadata.certainty
-    ).objects
-    assert len(objects_distance) == 3
-
-    client.collections.delete("TestNearVector")
-
-
-def test_near_vector_group_by(client: weaviate.WeaviateClient):
-    collection = client.collections.create(
-        name="TestNearVectorGroupBy",
-        properties=[
-            Property(name="Name", data_type=DataType.TEXT),
-            Property(name="Count", data_type=DataType.INT),
-        ],
-        vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
-    )
-    uuid_banana1 = collection.data.insert({"Name": "Banana", "Count": 51})
-    collection.data.insert({"Name": "Banana", "Count": 72})
-    collection.data.insert({"Name": "car", "Count": 12})
-    collection.data.insert({"Name": "Mountain", "Count": 1})
-
-    banana1 = collection.query.fetch_object_by_id(uuid_banana1, include_vector=True)
-
-    assert banana1.metadata.vector is not None
-    ret = collection.query_group_by.near_vector(
-        banana1.metadata.vector,
-        group_by_property="name",
-        number_of_groups=4,
-        objects_per_group=10,
-        return_metadata=MetadataQuery(distance=True, certainty=True),
-    )
-
-    assert len(ret.objects) == 4
-    assert ret.objects[0].belongs_to_group == "Banana"
-    assert ret.objects[1].belongs_to_group == "Banana"
-    assert ret.objects[2].belongs_to_group == "car"
-    assert ret.objects[3].belongs_to_group == "Mountain"
-
-    client.collections.delete("TestNearVector")
+        await aclient.collections.delete("TestQueryProperties")
 
 
-def test_near_object(client: weaviate.WeaviateClient):
-    collection = client.collections.create(
-        name="TestNearObject",
-        properties=[Property(name="Name", data_type=DataType.TEXT)],
-        vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
-    )
-    uuid_banana = collection.data.insert({"Name": "Banana"})
-    collection.data.insert({"Name": "Fruit"})
-    collection.data.insert({"Name": "car"})
-    collection.data.insert({"Name": "Mountain"})
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_near_vector(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
+    if is_sync:
+        collection = client.collections.create(
+            name="TestNearVector",
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
+        )
+        uuid_banana = collection.data.insert({"Name": "Banana"})
+        collection.data.insert({"Name": "Fruit"})
+        collection.data.insert({"Name": "car"})
+        collection.data.insert({"Name": "Mountain"})
 
-    full_objects = collection.query.near_object(
-        uuid_banana, return_metadata=MetadataQuery(distance=True, certainty=True)
-    ).objects
-    assert len(full_objects) == 4
+        banana = collection.query.fetch_object_by_id(uuid_banana, include_vector=True)
 
-    objects_distance = collection.query.near_object(
-        uuid_banana, distance=full_objects[2].metadata.distance
-    ).objects
-    assert len(objects_distance) == 3
+        full_objects = collection.query.near_vector(
+            banana.metadata.vector, return_metadata=MetadataQuery(distance=True, certainty=True)
+        ).objects
+        assert len(full_objects) == 4
 
-    objects_certainty = collection.query.near_object(
-        uuid_banana, certainty=full_objects[2].metadata.certainty
-    ).objects
-    assert len(objects_certainty) == 3
+        objects_distance = collection.query.near_vector(
+            banana.metadata.vector, distance=full_objects[2].metadata.distance
+        ).objects
+        assert len(objects_distance) == 3
 
-    client.collections.delete("TestNearObject")
+        objects_distance = collection.query.near_vector(
+            banana.metadata.vector, certainty=full_objects[2].metadata.certainty
+        ).objects
+        assert len(objects_distance) == 3
+
+        client.collections.delete("TestNearVector")
+    else:
+        collection = await aclient.collections.create(
+            name="TestNearVector",
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
+        )
+        uuid_banana = await collection.data.insert({"Name": "Banana"})
+        await collection.data.insert({"Name": "Fruit"})
+        await collection.data.insert({"Name": "car"})
+        await collection.data.insert({"Name": "Mountain"})
+
+        banana = await collection.query.fetch_object_by_id(uuid_banana, include_vector=True)
+
+        full_objects = (
+            await collection.query.near_vector(
+                banana.metadata.vector, return_metadata=MetadataQuery(distance=True, certainty=True)
+            )
+        ).objects
+        assert len(full_objects) == 4
+
+        objects_distance = (
+            await collection.query.near_vector(
+                banana.metadata.vector, distance=full_objects[2].metadata.distance
+            )
+        ).objects
+        assert len(objects_distance) == 3
+
+        objects_distance = (
+            await collection.query.near_vector(
+                banana.metadata.vector, certainty=full_objects[2].metadata.certainty
+            )
+        ).objects
+        assert len(objects_distance) == 3
+
+        await aclient.collections.delete("TestNearVector")
 
 
-def test_near_object_group_by(client: weaviate.WeaviateClient):
-    collection = client.collections.create(
-        name="TestNearObjectGroupBy",
-        properties=[
-            Property(name="Name", data_type=DataType.TEXT),
-            Property(name="Count", data_type=DataType.INT),
-        ],
-        vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
-    )
-    uuid_banana1 = collection.data.insert({"Name": "Banana", "Count": 51})
-    collection.data.insert({"Name": "Banana", "Count": 72})
-    collection.data.insert({"Name": "car", "Count": 12})
-    collection.data.insert({"Name": "Mountain", "Count": 1})
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_near_vector_group_by(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
+    if is_sync:
+        collection = client.collections.create(
+            name="TestNearVectorGroupBy",
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+                Property(name="Count", data_type=DataType.INT),
+            ],
+            vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
+        )
+        uuid_banana1 = collection.data.insert({"Name": "Banana", "Count": 51})
+        collection.data.insert({"Name": "Banana", "Count": 72})
+        collection.data.insert({"Name": "car", "Count": 12})
+        collection.data.insert({"Name": "Mountain", "Count": 1})
 
-    ret = collection.query_group_by.near_object(
-        uuid_banana1,
-        group_by_property="name",
-        number_of_groups=4,
-        objects_per_group=10,
-        return_metadata=MetadataQuery(distance=True, certainty=True),
-    )
+        banana1 = collection.query.fetch_object_by_id(uuid_banana1, include_vector=True)
 
-    assert len(ret.objects) == 4
-    assert ret.objects[0].belongs_to_group == "Banana"
-    assert ret.objects[1].belongs_to_group == "Banana"
-    assert ret.objects[2].belongs_to_group == "car"
-    assert ret.objects[3].belongs_to_group == "Mountain"
+        assert banana1.metadata.vector is not None
+        ret = collection.query_group_by.near_vector(
+            banana1.metadata.vector,
+            group_by_property="name",
+            number_of_groups=4,
+            objects_per_group=10,
+            return_metadata=MetadataQuery(distance=True, certainty=True),
+        )
 
-    client.collections.delete("TestNearObject")
+        assert len(ret.objects) == 4
+        assert ret.objects[0].belongs_to_group == "Banana"
+        assert ret.objects[1].belongs_to_group == "Banana"
+        assert ret.objects[2].belongs_to_group == "car"
+        assert ret.objects[3].belongs_to_group == "Mountain"
+
+        client.collections.delete("TestNearVector")
+    else:
+        collection = await aclient.collections.create(
+            name="TestNearVectorGroupBy",
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+                Property(name="Count", data_type=DataType.INT),
+            ],
+            vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
+        )
+        uuid_banana1 = await collection.data.insert({"Name": "Banana", "Count": 51})
+        await collection.data.insert({"Name": "Banana", "Count": 72})
+        await collection.data.insert({"Name": "car", "Count": 12})
+        await collection.data.insert({"Name": "Mountain", "Count": 1})
+
+        banana1 = await collection.query.fetch_object_by_id(uuid_banana1, include_vector=True)
+
+        assert banana1.metadata.vector is not None
+        ret = await collection.query_group_by.near_vector(
+            banana1.metadata.vector,
+            group_by_property="name",
+            number_of_groups=4,
+            objects_per_group=10,
+            return_metadata=MetadataQuery(distance=True, certainty=True),
+        )
+
+        assert len(ret.objects) == 4
+        assert ret.objects[0].belongs_to_group == "Banana"
+        assert ret.objects[1].belongs_to_group == "Banana"
+        assert ret.objects[2].belongs_to_group == "car"
+        assert ret.objects[3].belongs_to_group == "Mountain"
+
+        await aclient.collections.delete("TestNearVector")
 
 
-def test_tenants(client: weaviate.WeaviateClient):
-    collection = client.collections.create(
-        name="Tenants",
-        vectorizer_config=Configure.Vectorizer.none(),
-        multi_tenancy_config=Configure.multi_tenancy(
-            enabled=True,
-        ),
-    )
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_near_object(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
+    if is_sync:
+        collection = client.collections.create(
+            name="TestNearObject",
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
+        )
+        uuid_banana = collection.data.insert({"Name": "Banana"})
+        collection.data.insert({"Name": "Fruit"})
+        collection.data.insert({"Name": "car"})
+        collection.data.insert({"Name": "Mountain"})
 
-    collection.tenants.create([Tenant(name="tenant1")])
+        full_objects = collection.query.near_object(
+            uuid_banana, return_metadata=MetadataQuery(distance=True, certainty=True)
+        ).objects
+        assert len(full_objects) == 4
 
-    tenants = collection.tenants.get()
-    assert len(tenants) == 1
-    assert type(tenants["tenant1"]) is Tenant
-    assert tenants["tenant1"].name == "tenant1"
+        objects_distance = collection.query.near_object(
+            uuid_banana, distance=full_objects[2].metadata.distance
+        ).objects
+        assert len(objects_distance) == 3
 
-    collection.tenants.remove(["tenant1"])
+        objects_certainty = collection.query.near_object(
+            uuid_banana, certainty=full_objects[2].metadata.certainty
+        ).objects
+        assert len(objects_certainty) == 3
 
-    tenants = collection.tenants.get()
-    assert len(tenants) == 0
+        client.collections.delete("TestNearObject")
+    else:
+        collection = await aclient.collections.create(
+            name="TestNearObject",
+            properties=[Property(name="Name", data_type=DataType.TEXT)],
+            vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
+        )
+        uuid_banana = await collection.data.insert({"Name": "Banana"})
+        await collection.data.insert({"Name": "Fruit"})
+        await collection.data.insert({"Name": "car"})
+        await collection.data.insert({"Name": "Mountain"})
 
-    client.collections.delete("Tenants")
+        full_objects = (
+            await collection.query.near_object(
+                uuid_banana, return_metadata=MetadataQuery(distance=True, certainty=True)
+            )
+        ).objects
+        assert len(full_objects) == 4
+
+        objects_distance = (
+            await collection.query.near_object(
+                uuid_banana, distance=full_objects[2].metadata.distance
+            )
+        ).objects
+        assert len(objects_distance) == 3
+
+        objects_certainty = (
+            await collection.query.near_object(
+                uuid_banana, certainty=full_objects[2].metadata.certainty
+            )
+        ).objects
+        assert len(objects_certainty) == 3
+
+        await aclient.collections.delete("TestNearObject")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_near_object_group_by(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
+    if is_sync:
+        collection = client.collections.create(
+            name="TestNearObjectGroupBy",
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+                Property(name="Count", data_type=DataType.INT),
+            ],
+            vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
+        )
+        uuid_banana1 = collection.data.insert({"Name": "Banana", "Count": 51})
+        collection.data.insert({"Name": "Banana", "Count": 72})
+        collection.data.insert({"Name": "car", "Count": 12})
+        collection.data.insert({"Name": "Mountain", "Count": 1})
+
+        ret = collection.query_group_by.near_object(
+            uuid_banana1,
+            group_by_property="name",
+            number_of_groups=4,
+            objects_per_group=10,
+            return_metadata=MetadataQuery(distance=True, certainty=True),
+        )
+
+        assert len(ret.objects) == 4
+        assert ret.objects[0].belongs_to_group == "Banana"
+        assert ret.objects[1].belongs_to_group == "Banana"
+        assert ret.objects[2].belongs_to_group == "car"
+        assert ret.objects[3].belongs_to_group == "Mountain"
+
+        client.collections.delete("TestNearObject")
+    else:
+        collection = await aclient.collections.create(
+            name="TestNearObjectGroupBy",
+            properties=[
+                Property(name="Name", data_type=DataType.TEXT),
+                Property(name="Count", data_type=DataType.INT),
+            ],
+            vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
+        )
+        uuid_banana1 = await collection.data.insert({"Name": "Banana", "Count": 51})
+        await collection.data.insert({"Name": "Banana", "Count": 72})
+        await collection.data.insert({"Name": "car", "Count": 12})
+        await collection.data.insert({"Name": "Mountain", "Count": 1})
+
+        ret = await collection.query_group_by.near_object(
+            uuid_banana1,
+            group_by_property="name",
+            number_of_groups=4,
+            objects_per_group=10,
+            return_metadata=MetadataQuery(distance=True, certainty=True),
+        )
+
+        assert len(ret.objects) == 4
+        assert ret.objects[0].belongs_to_group == "Banana"
+        assert ret.objects[1].belongs_to_group == "Banana"
+        assert ret.objects[2].belongs_to_group == "car"
+        assert ret.objects[3].belongs_to_group == "Mountain"
+
+        await aclient.collections.delete("TestNearObject")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_tenants(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
+    if is_sync:
+        collection = client.collections.create(
+            name="Tenants",
+            vectorizer_config=Configure.Vectorizer.none(),
+            multi_tenancy_config=Configure.multi_tenancy(
+                enabled=True,
+            ),
+        )
+
+        collection.tenants.create([Tenant(name="tenant1")])
+
+        tenants = collection.tenants.get()
+        assert len(tenants) == 1
+        assert type(tenants["tenant1"]) is Tenant
+        assert tenants["tenant1"].name == "tenant1"
+
+        collection.tenants.remove(["tenant1"])
+
+        tenants = collection.tenants.get()
+        assert len(tenants) == 0
+
+        client.collections.delete("Tenants")
+    else:
+        collection = await aclient.collections.create(
+            name="Tenants",
+            vectorizer_config=Configure.Vectorizer.none(),
+            multi_tenancy_config=Configure.multi_tenancy(
+                enabled=True,
+            ),
+        )
+
+        await collection.tenants.create([Tenant(name="tenant1")])
+
+        tenants = await collection.tenants.get()
+        assert len(tenants) == 1
+        assert type(tenants["tenant1"]) is Tenant
+        assert tenants["tenant1"].name == "tenant1"
+
+        await collection.tenants.remove(["tenant1"])
+
+        tenants = await collection.tenants.get()
+        assert len(tenants) == 0
+
+        await aclient.collections.delete("Tenants")
 
 
 def test_multi_searches(client: weaviate.WeaviateClient):
@@ -885,26 +1428,59 @@ def test_multi_searches(client: weaviate.WeaviateClient):
     client.collections.delete("TestMultiSearches")
 
 
-def test_search_with_tenant(client: weaviate.WeaviateClient):
-    collection = client.collections.create(
-        name="TestTenantSearch",
-        vectorizer_config=Configure.Vectorizer.none(),
-        properties=[Property(name="name", data_type=DataType.TEXT)],
-        multi_tenancy_config=Configure.multi_tenancy(enabled=True),
-    )
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_search_with_tenant(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
+    if is_sync:
+        collection = client.collections.create(
+            name="TestTenantSearch",
+            vectorizer_config=Configure.Vectorizer.none(),
+            properties=[Property(name="name", data_type=DataType.TEXT)],
+            multi_tenancy_config=Configure.multi_tenancy(enabled=True),
+        )
 
-    collection.tenants.create([Tenant(name="Tenant1"), Tenant(name="Tenant2")])
-    tenant1 = collection.with_tenant("Tenant1")
-    tenant2 = collection.with_tenant("Tenant2")
-    uuid1 = tenant1.data.insert({"name": "some name"})
-    objects1 = tenant1.query.bm25(query="some", return_metadata=MetadataQuery(uuid=True)).objects
-    assert len(objects1) == 1
-    assert objects1[0].metadata.uuid == uuid1
+        collection.tenants.create([Tenant(name="Tenant1"), Tenant(name="Tenant2")])
+        tenant1 = collection.with_tenant("Tenant1")
+        tenant2 = collection.with_tenant("Tenant2")
+        uuid1 = tenant1.data.insert({"name": "some name"})
+        objects1 = tenant1.query.bm25(
+            query="some", return_metadata=MetadataQuery(uuid=True)
+        ).objects
+        assert len(objects1) == 1
+        assert objects1[0].metadata.uuid == uuid1
 
-    objects2 = tenant2.query.bm25(query="some", return_metadata=MetadataQuery(uuid=True)).objects
-    assert len(objects2) == 0
+        objects2 = tenant2.query.bm25(
+            query="some", return_metadata=MetadataQuery(uuid=True)
+        ).objects
+        assert len(objects2) == 0
 
-    client.collections.delete("TestTenantSearch")
+        client.collections.delete("TestTenantSearch")
+    else:
+        collection = await aclient.collections.create(
+            name="TestTenantSearch",
+            vectorizer_config=Configure.Vectorizer.none(),
+            properties=[Property(name="name", data_type=DataType.TEXT)],
+            multi_tenancy_config=Configure.multi_tenancy(enabled=True),
+        )
+
+        await collection.tenants.create([Tenant(name="Tenant1"), Tenant(name="Tenant2")])
+        tenant1 = collection.with_tenant("Tenant1")
+        tenant2 = collection.with_tenant("Tenant2")
+        uuid1 = await tenant1.data.insert({"name": "some name"})
+        objects1 = (
+            await tenant1.query.bm25(query="some", return_metadata=MetadataQuery(uuid=True))
+        ).objects
+        assert len(objects1) == 1
+        assert objects1[0].metadata.uuid == uuid1
+
+        objects2 = (
+            await tenant2.query.bm25(query="some", return_metadata=MetadataQuery(uuid=True))
+        ).objects
+        assert len(objects2) == 0
+
+        await aclient.collections.delete("TestTenantSearch")
 
 
 def test_fetch_object_by_id_with_tenant(client: weaviate.WeaviateClient):
@@ -996,27 +1572,6 @@ def test_add_property(client: weaviate.WeaviateClient):
     assert "number" in obj2.properties
 
     client.collections.delete("TestAddProperty")
-
-
-def test_collection_config_get(client: weaviate.WeaviateClient):
-    collection = client.collections.create(
-        name="TestCollectionSchemaGet",
-        vectorizer_config=Configure.Vectorizer.none(),
-        properties=[
-            Property(name="name", data_type=DataType.TEXT),
-            Property(name="age", data_type=DataType.INT),
-        ],
-    )
-    config = collection.config.get()
-    assert config.name == "TestCollectionSchemaGet"
-    assert len(config.properties) == 2
-    assert config.properties[0].name == "name"
-    assert config.properties[0].data_type == DataType.TEXT
-    assert config.properties[1].name == "age"
-    assert config.properties[1].data_type == DataType.INT
-    assert config.vectorizer == Vectorizer.NONE
-
-    client.collections.delete("TestCollectionSchemaGet")
 
 
 def test_empty_search_returns_everything(client: weaviate.WeaviateClient):
@@ -1172,44 +1727,80 @@ def test_return_list_properties(client: weaviate.WeaviateClient):
     assert objects[0].properties == data
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("query", ["cake", ["cake"]])
 @pytest.mark.parametrize("objects", [UUID1, str(UUID1), [UUID1], [str(UUID1)]])
 @pytest.mark.parametrize("concepts", ["hiking", ["hiking"]])
-def test_near_text(
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_near_text(
     client: weaviate.WeaviateClient,
+    aclient: weaviate.WeaviateAsyncClient,
     query: Union[str, List[str]],
     objects: Union[UUID, List[UUID]],
     concepts: Union[str, List[str]],
+    is_sync: bool,
 ):
     name = "TestNearText"
-    client.collections.delete(name)
-    collection = client.collections.create(
-        name=name,
-        vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
-        properties=[Property(name="value", data_type=DataType.TEXT)],
-    )
+    if is_sync:
+        client.collections.delete(name)
+        collection = client.collections.create(
+            name=name,
+            vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
+            properties=[Property(name="value", data_type=DataType.TEXT)],
+        )
 
-    batch_return = collection.data.insert_many(
-        [
-            DataObject(properties={"value": "Apple"}, uuid=UUID1),
-            DataObject(properties={"value": "Mountain climbing"}),
-            DataObject(properties={"value": "apple cake"}),
-            DataObject(properties={"value": "cake"}),
-        ]
-    )
+        batch_return = collection.data.insert_many(
+            [
+                DataObject(properties={"value": "Apple"}, uuid=UUID1),
+                DataObject(properties={"value": "Mountain climbing"}),
+                DataObject(properties={"value": "apple cake"}),
+                DataObject(properties={"value": "cake"}),
+            ]
+        )
 
-    objs = collection.query.near_text(
-        query=query,
-        move_to=Move(force=1.0, objects=objects),
-        move_away=Move(force=0.5, concepts=concepts),
-        return_metadata=MetadataQuery(uuid=True),
-        return_properties=["value"],
-    ).objects
+        objs = collection.query.near_text(
+            query=query,
+            move_to=Move(force=1.0, objects=objects),
+            move_away=Move(force=0.5, concepts=concepts),
+            return_metadata=MetadataQuery(uuid=True),
+            return_properties=["value"],
+        ).objects
 
-    assert len(objs) == 4
+        assert len(objs) == 4
 
-    assert objs[0].metadata.uuid == batch_return.uuids[2]
-    assert objs[0].properties["value"] == "apple cake"
+        assert objs[0].metadata.uuid == batch_return.uuids[2]
+        assert objs[0].properties["value"] == "apple cake"
+    else:
+        await aclient.collections.delete(name)
+        collection = await aclient.collections.create(
+            name=name,
+            vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
+            properties=[Property(name="value", data_type=DataType.TEXT)],
+        )
+
+        batch_return = await collection.data.insert_many(
+            [
+                DataObject(properties={"value": "Apple"}, uuid=UUID1),
+                DataObject(properties={"value": "Mountain climbing"}),
+                DataObject(properties={"value": "apple cake"}),
+                DataObject(properties={"value": "cake"}),
+            ]
+        )
+
+        objs = (
+            await collection.query.near_text(
+                query=query,
+                move_to=Move(force=1.0, objects=objects),
+                move_away=Move(force=0.5, concepts=concepts),
+                return_metadata=MetadataQuery(uuid=True),
+                return_properties=["value"],
+            )
+        ).objects
+
+        assert len(objs) == 4
+
+        assert objs[0].metadata.uuid == batch_return.uuids[2]
+        assert objs[0].properties["value"] == "apple cake"
 
 
 def test_near_text_error(client: weaviate.WeaviateClient):
@@ -1224,38 +1815,74 @@ def test_near_text_error(client: weaviate.WeaviateClient):
         collection.query.near_text(query="test", move_to=Move(force=1.0))
 
 
-def test_near_text_group_by(client: weaviate.WeaviateClient):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_near_text_group_by(
+    client: weaviate.WeaviateClient, aclient: weaviate.WeaviateAsyncClient, is_sync: bool
+):
     name = "TestNearTextGroupBy"
-    client.collections.delete(name)
-    collection = client.collections.create(
-        name=name,
-        vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
-        properties=[Property(name="value", data_type=DataType.TEXT)],
-    )
+    if is_sync:
+        client.collections.delete(name)
+        collection = client.collections.create(
+            name=name,
+            vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
+            properties=[Property(name="value", data_type=DataType.TEXT)],
+        )
 
-    batch_return = collection.data.insert_many(
-        [
-            DataObject(properties={"value": "Apple"}, uuid=UUID1),
-            DataObject(properties={"value": "Mountain climbing"}),
-            DataObject(properties={"value": "apple cake"}),
-            DataObject(properties={"value": "cake"}),
-        ]
-    )
+        batch_return = collection.data.insert_many(
+            [
+                DataObject(properties={"value": "Apple"}, uuid=UUID1),
+                DataObject(properties={"value": "Mountain climbing"}),
+                DataObject(properties={"value": "apple cake"}),
+                DataObject(properties={"value": "cake"}),
+            ]
+        )
 
-    ret = collection.query_group_by.near_text(
-        query="cake",
-        group_by_property="value",
-        number_of_groups=2,
-        objects_per_group=100,
-        return_metadata=MetadataQuery(uuid=True),
-        return_properties=["value"],
-    )
+        ret = collection.query_group_by.near_text(
+            query="cake",
+            group_by_property="value",
+            number_of_groups=2,
+            objects_per_group=100,
+            return_metadata=MetadataQuery(uuid=True),
+            return_properties=["value"],
+        )
 
-    assert len(ret.objects) == 2
-    assert ret.objects[0].metadata.uuid == batch_return.uuids[2]
-    assert ret.objects[0].belongs_to_group == "apple cake"
-    assert ret.objects[1].metadata.uuid == batch_return.uuids[3]
-    assert ret.objects[1].belongs_to_group == "cake"
+        assert len(ret.objects) == 2
+        assert ret.objects[0].metadata.uuid == batch_return.uuids[2]
+        assert ret.objects[0].belongs_to_group == "apple cake"
+        assert ret.objects[1].metadata.uuid == batch_return.uuids[3]
+        assert ret.objects[1].belongs_to_group == "cake"
+    else:
+        await aclient.collections.delete(name)
+        collection = await aclient.collections.create(
+            name=name,
+            vectorizer_config=Configure.Vectorizer.text2vec_contextionary(),
+            properties=[Property(name="value", data_type=DataType.TEXT)],
+        )
+
+        batch_return = await collection.data.insert_many(
+            [
+                DataObject(properties={"value": "Apple"}, uuid=UUID1),
+                DataObject(properties={"value": "Mountain climbing"}),
+                DataObject(properties={"value": "apple cake"}),
+                DataObject(properties={"value": "cake"}),
+            ]
+        )
+
+        ret = await collection.query_group_by.near_text(
+            query="cake",
+            group_by_property="value",
+            number_of_groups=2,
+            objects_per_group=100,
+            return_metadata=MetadataQuery(uuid=True),
+            return_properties=["value"],
+        )
+
+        assert len(ret.objects) == 2
+        assert ret.objects[0].metadata.uuid == batch_return.uuids[2]
+        assert ret.objects[0].belongs_to_group == "apple cake"
+        assert ret.objects[1].metadata.uuid == batch_return.uuids[3]
+        assert ret.objects[1].belongs_to_group == "cake"
 
 
 def test_near_text_limit(client: weaviate.WeaviateClient):
@@ -1290,6 +1917,7 @@ def test_near_text_limit(client: weaviate.WeaviateClient):
     assert objects[1].properties["value"] == "cake"
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "image_maker",
     [
@@ -1303,33 +1931,60 @@ def test_near_text_limit(client: weaviate.WeaviateClient):
     "distance,certainty",
     [(None, None), (10, None), (None, 0.1)],
 )
-def test_near_image(
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_near_image(
     client: weaviate.WeaviateClient,
+    aclient: weaviate.WeaviateAsyncClient,
     image_maker: Callable[[], Union[str, pathlib.Path, io.BufferedReader]],
     distance: Optional[float],
     certainty: Optional[float],
+    is_sync: bool,
 ):
     name = "TestNearImage"
-    client.collections.delete(name)
-    collection = client.collections.create(
-        name=name,
-        vectorizer_config=Configure.Vectorizer.img2vec_neural(image_fields=["imageProp"]),
-        properties=[
-            Property(name="imageProp", data_type=DataType.BLOB),
-        ],
-    )
+    if is_sync:
+        client.collections.delete(name)
+        collection = client.collections.create(
+            name=name,
+            vectorizer_config=Configure.Vectorizer.img2vec_neural(image_fields=["imageProp"]),
+            properties=[
+                Property(name="imageProp", data_type=DataType.BLOB),
+            ],
+        )
 
-    uuid1 = collection.data.insert(properties={"imageProp": WEAVIATE_LOGO_OLD_ENCODED})
-    collection.data.insert(properties={"imageProp": WEAVIATE_LOGO_NEW_ENCODED})
+        uuid1 = collection.data.insert(properties={"imageProp": WEAVIATE_LOGO_OLD_ENCODED})
+        collection.data.insert(properties={"imageProp": WEAVIATE_LOGO_NEW_ENCODED})
 
-    image = image_maker()
-    objects = collection.query.near_image(image, distance=distance, certainty=certainty).objects
+        image = image_maker()
+        objects = collection.query.near_image(image, distance=distance, certainty=certainty).objects
 
-    if isinstance(image, io.BufferedReader):
-        image.close()
+        if isinstance(image, io.BufferedReader):
+            image.close()
 
-    assert len(objects) == 2
-    assert objects[0].metadata.uuid == uuid1
+        assert len(objects) == 2
+        assert objects[0].metadata.uuid == uuid1
+    else:
+        await aclient.collections.delete(name)
+        collection = await aclient.collections.create(
+            name=name,
+            vectorizer_config=Configure.Vectorizer.img2vec_neural(image_fields=["imageProp"]),
+            properties=[
+                Property(name="imageProp", data_type=DataType.BLOB),
+            ],
+        )
+
+        uuid1 = await collection.data.insert(properties={"imageProp": WEAVIATE_LOGO_OLD_ENCODED})
+        await collection.data.insert(properties={"imageProp": WEAVIATE_LOGO_NEW_ENCODED})
+
+        image = image_maker()
+        objects = (
+            await collection.query.near_image(image, distance=distance, certainty=certainty)
+        ).objects
+
+        if isinstance(image, io.BufferedReader):
+            image.close()
+
+        assert len(objects) == 2
+        assert objects[0].metadata.uuid == uuid1
 
 
 @pytest.mark.parametrize("which_case", [0, 1, 2, 3])
@@ -1438,7 +2093,7 @@ def test_return_properties_with_query_specific_typed_dict_overwriting_general_ty
     assert "ints" not in objects[0].properties
 
 
-def test_batch_with_arrays(client: weaviate.WeaviateClient):
+def test_insert_many_with_arrays(client: weaviate.WeaviateClient):
     client.collections.delete("TestBatchArrays")
     collection = client.collections.create(
         name="TestBatchArrays",
@@ -1560,6 +2215,7 @@ def test_optional_ref_returns(client: weaviate.WeaviateClient):
     assert objects[0].properties["ref"].objects[0].metadata.uuid is not None
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "count",
     [
@@ -1575,24 +2231,57 @@ def test_optional_ref_returns(client: weaviate.WeaviateClient):
         20 * ITERATOR_CACHE_SIZE,
     ],
 )
-def test_iterator(client: weaviate.WeaviateClient, count: int):
+@pytest.mark.parametrize("is_sync", [True, False])
+async def test_iterator(
+    client: weaviate.WeaviateClient,
+    aclient: weaviate.WeaviateAsyncClient,
+    count: int,
+    is_sync: bool,
+):
     name = "TestIterator"
-    client.collections.delete(name)
+    if is_sync:
+        client.collections.delete(name)
 
-    collection = client.collections.create(
-        name=name,
-        properties=[Property(name="data", data_type=DataType.INT)],
-        vectorizer_config=Configure.Vectorizer.none(),
-    )
+        collection = client.collections.create(
+            name=name,
+            properties=[Property(name="data", data_type=DataType.INT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
 
-    if count > 0:
-        collection.data.insert_many([DataObject(properties={"data": i}) for i in range(count)])
+        if count > 0:
+            collection.data.insert_many([DataObject(properties={"data": i}) for i in range(count)])
 
-    # make sure a new iterator resets the internal state
-    for _ in range(3):
-        # get the property and sort them - order returned by weaviate is not identical to the order inserted
-        all_data: list[int] = sorted([int(obj.properties["data"]) for obj in collection.iterator()])
-        assert all_data == list(range(count))
+        # make sure a new iterator resets the internal state
+        for _ in range(3):
+            # get the property and sort them - order returned by weaviate is not identical to the order inserted
+            all_data: list[int] = sorted(
+                [int(obj.properties["data"]) for obj in collection.iterator()]
+            )
+            assert all_data == list(range(count))
+    else:
+        await aclient.collections.delete(name)
+
+        collection = await aclient.collections.create(
+            name=name,
+            properties=[Property(name="data", data_type=DataType.INT)],
+            vectorizer_config=Configure.Vectorizer.none(),
+        )
+
+        if count > 0:
+            done = await collection.data.insert_many(
+                [DataObject(properties={"data": i}) for i in range(count)]
+            )
+        else:
+            done = None
+        if done is not None:
+            assert done.has_errors is False
+        # make sure a new iterator resets the internal state
+        for _ in range(3):
+            # get the property and sort them - order returned by weaviate is not identical to the order inserted
+            all_data: list[int] = sorted(
+                [int(obj.properties["data"]) async for obj in collection.iterator()]
+            )
+            assert all_data == list(range(count))
 
 
 class Data(TypedDict):

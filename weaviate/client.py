@@ -8,11 +8,12 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
 from .auth import AuthCredentials
 from .backup import Backup
 from .batch import Batch
-from .collections.batch import _Batch
 from .classification import Classification
 from .cluster import Cluster
-from .collections import _Collections
+from .collections.batch import _Batch
+from .collections import _Collections, _CollectionsAsync
 from .config import AdditionalConfig, Config
+from .connect.asynchronous import ConnectionAsync
 from .connect.connection import (
     Connection,
     ConnectionParams,
@@ -249,6 +250,137 @@ class WeaviateClient(_ClientBase):
 
         Use it to retrieve collection objects using `client.collections.get("MyCollection")` or to create new collections using `client.collections.create("MyCollection", ...)`.
         """
+
+
+class WeaviateAsyncClient:
+    """
+    The v4 Python-native Weaviate Client class that encapsulates Weaviate functionalities in one object.
+
+    WARNING: This client is only compatible with Weaviate v1.22.0 and higher!
+
+    A Client instance creates all the needed objects to interact with Weaviate, and connects all of
+    them to the same Weaviate instance. See below the Attributes of the Client instance. For the
+    per attribute functionality see that attribute's documentation.
+
+    Attributes:
+        `backup`
+            A `Backup` object instance connected to the same Weaviate instance as the Client.
+        `batch`
+            A `_Batch` object instance connected to the same Weaviate instance as the Client.
+        `classification`
+            A `Classification` object instance connected to the same Weaviate instance as the Client.
+        `cluster`
+            A `Cluster` object instance connected to the same Weaviate instance as the Client.
+        `collections`
+            A `_Collections` object instance connected to the same Weaviate instance as the Client.
+        `contextionary`
+            A `Contextionary` object instance connected to the same Weaviate instance as the Client.
+    """
+
+    def __init__(
+        self,
+        connection_params: Optional[ConnectionParams] = None,
+        embedded_options: Optional[EmbeddedOptions] = None,
+        auth_client_secret: Optional[AuthCredentials] = None,
+        additional_headers: Optional[dict] = None,
+        additional_config: Optional[AdditionalConfig] = None,
+    ) -> None:
+        """Initialise a WeaviateClient class instance to use when interacting with Weaviate.
+
+        Use this specific initialiser when you want to create a custom Client specific to your Weaviate setup.
+
+        If you want to get going quickly connecting to WCS or a local instance then use the `weaviate.connect_to_wcs` or
+        `weaviate.connect_to_local` helper functions instead.
+
+        Arguments:
+            - `connection_params`: `weaviate.ConnectionParams` or None, optional
+                - The connection parameters to use for the underlying HTTP requests.
+            - `embedded_options`: `weaviate.EmbeddedOptions` or None, optional
+                - The options to use when provisioning an embedded Weaviate instance.
+            - `auth_client_secret`: `weaviate.AuthCredentials` or None, optional
+                - Authenticate to weaviate by using one of the given authentication modes:
+                    - `weaviate.auth.AuthBearerToken` to use existing access and (optionally, but recommended) refresh tokens
+                    - `weaviate.auth.AuthClientPassword` to use username and password for oidc Resource Owner Password flow
+                    - `weaviate.auth.AuthClientCredentials` to use a client secret for oidc client credential flow
+            - `additional_headers`: `dict` or None, optional
+                - Additional headers to include in the requests.
+                    - Can be used to set OpenAI/HuggingFace/Cohere etc. keys.
+                    - [Here](https://weaviate.io/developers/weaviate/modules/reader-generator-modules/generative-openai#providing-the-key-to-weaviate) is an
+                    example of how to set API keys within this parameter.
+            - `additional_config`: `weaviate.AdditionalConfig` or None, optional
+                - Additional and advanced configuration options for Weaviate.
+        """
+        connection_params, embedded_db = self._parse_connection_params_and_embedded_db(
+            connection_params, embedded_options
+        )
+        config = additional_config or AdditionalConfig()
+
+        self._connection = ConnectionAsync(
+            connection_params=connection_params,
+            auth_client_secret=auth_client_secret,
+            timeout_config=_get_valid_timeout_config(config.timeout),
+            additional_headers=additional_headers,
+            embedded_db=embedded_db,
+            connection_config=config.connection,
+            proxies=config.proxies,
+            trust_env=config.trust_env,
+            startup_period=config.startup_period,
+        )
+
+        # self.batch = AsyncBatch(self._connection)
+        """This namespace contains all the functionality to upload data in batches to Weaviate."""
+        self.collections = _CollectionsAsync(self._connection)
+        """This namespace contains all the functionality to manage Weaviate data collections. It is your main entry point for all collection-related functionality.
+
+        Use it to retrieve collection objects using `client.collections.get("MyCollection")` or to create new collections using `client.collections.create("MyCollection", ...)`.
+        """
+
+    @staticmethod
+    def _parse_connection_params_and_embedded_db(
+        connection_params: Optional[ConnectionParams], embedded_options: Optional[EmbeddedOptions]
+    ) -> Tuple[ConnectionParams, Optional[EmbeddedDB]]:
+        if connection_params is None and embedded_options is None:
+            raise TypeError("Either connection_params or embedded_options must be present.")
+        elif connection_params is not None and embedded_options is not None:
+            raise TypeError(
+                f"connection_params is not expected to be set when using embedded_options but connection_params was {connection_params}"
+            )
+
+        if embedded_options is not None:
+            embedded_db = EmbeddedDB(options=embedded_options)
+            embedded_db.start()
+            return (
+                ConnectionParams(
+                    http=ProtocolParams(
+                        host="localhost", port=embedded_db.options.port, secure=False
+                    ),
+                    grpc=ProtocolParams(
+                        host="localhost", port=embedded_options.grpc_port, secure=False
+                    ),
+                ),
+                embedded_db,
+            )
+
+        if not isinstance(connection_params, ConnectionParams):
+            raise TypeError(
+                f"connection_params is expected to be a ConnectionParams object but is {type(connection_params)}"
+            )
+
+        return connection_params, None
+
+    async def __aenter__(self) -> "WeaviateAsyncClient":
+        await self._connection.connect()
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback) -> None:  # type: ignore
+        await self._connection.close()
+
+    async def connect(self) -> bool:
+        await self._connection.connect()
+        return True
+
+    async def close(self) -> None:
+        await self._connection.close()
 
 
 class Client(_ClientBase):

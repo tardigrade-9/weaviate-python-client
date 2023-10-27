@@ -1,5 +1,6 @@
 from typing import Dict, Any, List, Literal, Optional, Type, Tuple, Union, cast, overload
 
+from httpx import ConnectError as HttpxConnectionError
 from requests.exceptions import ConnectionError as RequestsConnectionError
 
 from weaviate.collections.classes.config import (
@@ -17,11 +18,12 @@ from weaviate.collections.classes.config_methods import (
     _collection_config_simple_from_json,
 )
 from weaviate.collections.classes.orm import Model
-from weaviate.connect import Connection
+from weaviate.connect import Connection, ConnectionAsync
 from weaviate.exceptions import (
     UnexpectedStatusCodeException,
     ObjectAlreadyExistsException,
     WeaviateAddInvalidPropertyError,
+    WeaviateConnectionException,
 )
 
 
@@ -34,7 +36,7 @@ class _ConfigBase:
         try:
             response = self.__connection.get(path=f"/schema/{self._name}")
         except RequestsConnectionError as conn_err:
-            raise RequestsConnectionError(
+            raise WeaviateConnectionException(
                 "Collection configuration could not be retrieved."
             ) from conn_err
         if response.status_code != 200:
@@ -105,7 +107,7 @@ class _ConfigBase:
         try:
             response = self.__connection.put(path=f"/schema/{self._name}", weaviate_object=schema)
         except RequestsConnectionError as conn_err:
-            raise RequestsConnectionError(
+            raise WeaviateConnectionException(
                 "Collection configuration could not be updated."
             ) from conn_err
         if response.status_code != 200:
@@ -117,12 +119,117 @@ class _ConfigBase:
         try:
             response = self.__connection.post(path=path, weaviate_object=obj)
         except RequestsConnectionError as conn_err:
-            raise RequestsConnectionError("Property was not created properly.") from conn_err
+            raise WeaviateConnectionException("Property was not created properly.") from conn_err
         if response.status_code != 200:
             raise UnexpectedStatusCodeException("Add property to collection", response)
 
     def _get_property_by_name(self, property_name: str) -> Optional[_Property]:
         for prop in self.get().properties:
+            if prop.name == property_name:
+                return prop
+        return None
+
+
+class _ConfigBaseAsync:
+    def __init__(self, connection: ConnectionAsync, name: str) -> None:
+        self.__connection = connection
+        self._name = name
+
+    async def __get(self) -> Dict[str, Any]:
+        try:
+            response = await self.__connection.get(path=f"/schema/{self._name}")
+        except HttpxConnectionError as conn_err:
+            raise WeaviateConnectionException(
+                "Collection configuration could not be retrieved."
+            ) from conn_err
+        if response.status_code != 200:
+            raise UnexpectedStatusCodeException("Get collection configuration", response)
+        return cast(Dict[str, Any], response.json())
+
+    @overload
+    async def get(self, simple: Literal[False] = ...) -> _CollectionConfig:
+        ...
+
+    @overload
+    async def get(self, simple: Literal[True]) -> _CollectionConfigSimple:
+        ...
+
+    async def get(self, simple: bool = False) -> Union[_CollectionConfig, _CollectionConfigSimple]:
+        """Get the configuration for this collection from Weaviate.
+
+        Arguments:
+            simple : If True, return a simplified version of the configuration containing only name and properties.
+
+        Raises:
+            `requests.ConnectionError`
+                If the network connection to Weaviate fails.
+            `weaviate.UnexpectedStatusCodeException`
+                If Weaviate reports a non-OK status.
+        """
+        schema = await self.__get()
+        if simple:
+            return _collection_config_simple_from_json(schema)
+        return _collection_config_from_json(schema)
+
+    async def update(
+        self,
+        description: Optional[str] = None,
+        inverted_index_config: Optional[_InvertedIndexConfigUpdate] = None,
+        replication_config: Optional[_ReplicationConfigUpdate] = None,
+        vector_index_config: Optional[_VectorIndexConfigUpdate] = None,
+    ) -> None:
+        """Update the configuration for this collection in Weaviate.
+
+        Use the `weaviate.classes.ConfigureUpdate` class to generate the necessary configuration objects for this method.
+
+        Arguments:
+            description: A description of the collection.
+            inverted_index_config: Configuration for the inverted index. Use `ConfigureUpdate.inverted_index` to generate one.
+            replication_config: Configuration for the replication. Use `ConfigureUpdate.replication` to generate one.
+            vector_index_config: Configuration for the vector index. Use `ConfigureUpdate.vector_index` to generate one.
+
+        Raises:
+            `requests.ConnectionError`:
+                If the network connection to Weaviate fails.
+            `weaviate.UnexpectedStatusCodeException`:
+                If Weaviate reports a non-OK status.
+
+        NOTE:
+            - If you wish to update a specific option within the configuration and cannot find it in `CollectionConfigUpdate` then it is an immutable option.
+            - To change it, you will have to delete the collection and recreate it with the desired options.
+            - This is not the case of adding properties, which can be done with `collection.config.add_property()`.
+        """
+        config = _CollectionConfigUpdate(
+            description=description,
+            inverted_index_config=inverted_index_config,
+            replication_config=replication_config,
+            vector_index_config=vector_index_config,
+        )
+        schema = await self.__get()
+        schema = config.merge_with_existing(schema)
+        try:
+            response = await self.__connection.put(
+                path=f"/schema/{self._name}", weaviate_object=schema
+            )
+        except HttpxConnectionError as conn_err:
+            raise WeaviateConnectionException(
+                "Collection configuration could not be updated."
+            ) from conn_err
+        if response.status_code != 200:
+            raise UnexpectedStatusCodeException("Update collection configuration", response)
+
+    async def _add_property(self, additional_property: PropertyType) -> None:
+        path = f"/schema/{self._name}/properties"
+        obj = additional_property._to_dict()
+        try:
+            response = await self.__connection.post(path=path, weaviate_object=obj)
+        except HttpxConnectionError as conn_err:
+            raise WeaviateConnectionException("Property was not created properly.") from conn_err
+        if response.status_code != 200:
+            raise UnexpectedStatusCodeException("Add property to collection", response)
+
+    async def _get_property_by_name(self, property_name: str) -> Optional[_Property]:
+        for prop in (await self.get()).properties:
             if prop.name == property_name:
                 return prop
         return None
@@ -148,6 +255,28 @@ class _ConfigCollection(_ConfigBase):
                 f"Property with name '{additional_property.name}' already exists in collection '{self._name}'."
             )
         self._add_property(additional_property)
+
+
+class _ConfigCollectionAsync(_ConfigBaseAsync):
+    async def add_property(self, additional_property: PropertyType) -> None:
+        """Add a property to the collection in Weaviate.
+
+        Arguments:
+            additional_property : The property to add to the collection.
+
+        Raises:
+            `requests.ConnectionError`:
+                If the network connection to Weaviate fails.
+            `weaviate.UnexpectedStatusCodeException`:
+                If Weaviate reports a non-OK status.
+            `weaviate.ObjectAlreadyExistsException`:
+                If the property already exists in the collection.
+        """
+        if (await self._get_property_by_name(additional_property.name)) is not None:
+            raise ObjectAlreadyExistsException(
+                f"Property with name '{additional_property.name}' already exists in collection '{self._name}'."
+            )
+        await self._add_property(additional_property)
 
 
 class _ConfigCollectionModel(_ConfigBase):

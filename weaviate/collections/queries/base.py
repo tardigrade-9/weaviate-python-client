@@ -56,7 +56,7 @@ from weaviate.collections.classes.types import (
     TProperties,
 )
 from weaviate.collections.grpc.query import _QueryGRPC, GroupByResult, SearchResponse, SearchResult
-from weaviate.connect import Connection
+from weaviate.connect.base import _ConnectionBase
 from weaviate.exceptions import WeaviateGrpcUnavailable
 from weaviate.util import file_encoder_b64
 from proto.v1 import base_pb2, search_get_pb2
@@ -64,10 +64,10 @@ from proto.v1 import base_pb2, search_get_pb2
 T = TypeVar("T")
 
 
-class _Grpc(Generic[Properties]):
+class _Query(Generic[Properties]):
     def __init__(
         self,
-        connection: Connection,
+        connection: _ConnectionBase,
         name: str,
         consistency_level: Optional[ConsistencyLevel],
         tenant: Optional[str],
@@ -80,7 +80,7 @@ class _Grpc(Generic[Properties]):
         self._type = type_
 
     def _query(self) -> _QueryGRPC:
-        if not self.__connection._grpc_available:
+        if not self.__connection.grpc_available():
             raise WeaviateGrpcUnavailable()
         return _QueryGRPC(self.__connection, self.__name, self.__tenant, self.__consistency_level)
 

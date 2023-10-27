@@ -8,7 +8,7 @@ import os
 import socket
 import time
 from threading import Thread, Event
-from typing import Any, Dict, Optional, Tuple, Union, cast
+from typing import Any, Dict, Literal, Optional, Tuple, Union, cast, overload
 from urllib.parse import urlparse
 
 import requests
@@ -23,6 +23,7 @@ from weaviate import __version__ as client_version
 from weaviate.auth import AuthCredentials, AuthClientCredentials, AuthApiKey
 from weaviate.config import ConnectionConfig
 from weaviate.connect.authentication import _Auth
+from weaviate.connect.base import _ConnectionBase
 from weaviate.embedded import EmbeddedDB
 from weaviate.exceptions import (
     AuthenticationFailedException,
@@ -44,6 +45,7 @@ from weaviate.types import NUMBER
 try:
     import grpc  # type: ignore
     from grpc import Channel
+    from grpc.aio import Channel as AioChannel  # type: ignore
     from proto.v1 import weaviate_pb2_grpc
 
     has_grpc = True
@@ -155,19 +157,42 @@ class ConnectionParams(BaseModel):
             return None
         return f"{self.grpc.host}:{self.grpc.port}"
 
-    def _grpc_channel(self) -> Optional[Channel]:
+    @overload
+    def _grpc_channel(self, mode: Literal["sync"]) -> Optional[Channel]:
+        ...
+
+    @overload
+    def _grpc_channel(self, mode: Literal["async"]) -> Optional[AioChannel]:
+        ...
+
+    def _grpc_channel(self, mode: Literal["sync", "async"]) -> Union[AioChannel, Channel, None]:
         if self.grpc is None:
             return None
         if self.grpc.secure:
-            return grpc.secure_channel(
-                target=self._grpc_target,
-                credentials=grpc.ssl_channel_credentials(),
-                options=GRPC_OPTIONS,
+            return (
+                grpc.secure_channel(
+                    target=self._grpc_target,
+                    credentials=grpc.ssl_channel_credentials(),
+                    options=GRPC_OPTIONS,
+                )
+                if mode == "sync"
+                else grpc.aio.secure_channel(
+                    target=self._grpc_target,
+                    credentials=grpc.ssl_channel_credentials(),
+                    options=GRPC_OPTIONS,
+                )
             )
         else:
-            return grpc.insecure_channel(
-                target=self._grpc_target,
-                options=GRPC_OPTIONS,
+            return (
+                grpc.insecure_channel(
+                    target=self._grpc_target,
+                    options=GRPC_OPTIONS,
+                )
+                if mode == "sync"
+                else grpc.aio.insecure_channel(
+                    target=self._grpc_target,
+                    options=GRPC_OPTIONS,
+                )
             )
 
     @property
@@ -183,7 +208,7 @@ class ConnectionParams(BaseModel):
         return self.grpc is not None
 
 
-class Connection:
+class Connection(_ConnectionBase):
     """
     Connection class used to communicate to a weaviate instance.
     """
@@ -256,7 +281,7 @@ class Connection:
                 s.connect(connection_params._grpc_address)
                 s.shutdown(2)
                 s.close()
-                grpc_channel = connection_params._grpc_channel()
+                grpc_channel = connection_params._grpc_channel("sync")
                 assert grpc_channel is not None
                 self._grpc_stub = weaviate_pb2_grpc.WeaviateStub(grpc_channel)
                 self._grpc_available = True
@@ -393,6 +418,12 @@ class Connection:
             return f"Bearer {self._session.token['access_token']}"
 
         return ""
+
+    def get_proxies(self) -> dict:
+        return self._proxies
+
+    def _get_additional_headers(self) -> Dict[str, str]:
+        return self.__additional_headers
 
     def _add_adapter_to_session(self, connection_config: ConnectionConfig) -> None:
         adapter = HTTPAdapter(
@@ -786,9 +817,11 @@ class Connection:
                 f"Weaviate did not start up in {startup_period} seconds. Either the Weaviate URL {self.url} is wrong or Weaviate did not start up in the interval given in 'startup_period'."
             ) from error
 
-    @property
     def grpc_stub(self) -> Optional[weaviate_pb2_grpc.WeaviateStub]:
         return self._grpc_stub
+
+    def grpc_available(self) -> bool:
+        return self._grpc_available
 
     @property
     def server_version(self) -> str:
@@ -840,9 +873,11 @@ class GRPCConnection(Connection):
                 f"gRPC is not enabled. Is your Weaviate version at least 1.22 or higher? Current is {self._server_version}"
             )
 
-    @property
     def grpc_stub(self) -> Optional[weaviate_pb2_grpc.WeaviateStub]:
         return self._grpc_stub
+
+    def get_proxies(self) -> dict:
+        return self._proxies
 
 
 def _get_epoch_time() -> int:

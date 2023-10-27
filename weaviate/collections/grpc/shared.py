@@ -1,12 +1,12 @@
 from typing import Optional, Tuple, List
 
 from weaviate.collections.classes.config import ConsistencyLevel
-from weaviate.connect import Connection
+from weaviate.connect.base import _ConnectionBase
 from proto.v1 import base_pb2
 
 
 class _BaseGRPC:
-    def __init__(self, connection: Connection, consistency_level: Optional[ConsistencyLevel]):
+    def __init__(self, connection: _ConnectionBase, consistency_level: Optional[ConsistencyLevel]):
         self._connection = connection
         self._consistency_level = self._get_consistency_level(consistency_level)
 
@@ -18,8 +18,8 @@ class _BaseGRPC:
         if len(access_token) > 0:
             metadata_list.append(("authorization", access_token))
 
-        if len(self._connection.additional_headers):
-            for key, val in self._connection.additional_headers.items():
+        if len(self._connection._get_additional_headers()):
+            for key, val in self._connection._get_additional_headers().items():
                 if val is not None:
                     metadata_list.append((key.lower(), val))
 

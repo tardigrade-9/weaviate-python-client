@@ -1,8 +1,9 @@
 """
 Weaviate Exceptions.
 """
-
-from requests import Response, exceptions
+from typing import Union
+import httpx
+import requests
 
 ERROR_CODE_EXPLANATION = {
     413: """Payload Too Large. Try to decrease the batch size or increase the maximum request size on your weaviate
@@ -35,7 +36,7 @@ class UnexpectedStatusCodeException(WeaviateBaseError):
     not handled in the client implementation and suggests an error.
     """
 
-    def __init__(self, message: str, response: Response):
+    def __init__(self, message: str, response: Union[httpx.Response, requests.Response]):
         """
         Is raised in case the status code returned from Weaviate is
         not handled in the client implementation and suggests an error.
@@ -48,7 +49,7 @@ class UnexpectedStatusCodeException(WeaviateBaseError):
         ----------
         message: str
             An error message specific to the context, in which the error occurred.
-        response: requests.Response
+        response: httpx.Response | requests.Response
             The request response of which the status code was unexpected.
         """
         self._status_code: int = response.status_code
@@ -56,7 +57,7 @@ class UnexpectedStatusCodeException(WeaviateBaseError):
 
         try:
             body = response.json()
-        except exceptions.JSONDecodeError:
+        except (httpx.DecodingError, requests.exceptions.JSONDecodeError):
             body = None
 
         msg = (
@@ -74,7 +75,7 @@ class UnexpectedStatusCodeException(WeaviateBaseError):
 
 
 class ResponseCannotBeDecodedException(WeaviateBaseError):
-    def __init__(self, location: str, response: Response):
+    def __init__(self, location: str, response: Union[httpx.Response, requests.Response]):
         """Raised when a weaviate response cannot be decoded to json
 
         Parameters
@@ -218,3 +219,12 @@ class WeaviateGrpcUnavailable(WeaviateBaseError):
     def __init__(self) -> None:
         msg = """gRPC is not available. Please make sure that gRPC is configured correctly in the client and on the server."""
         super().__init__(msg)
+
+
+class WeaviateConnectionException(WeaviateBaseError):
+    """Is raised when a connection request to Weaviate fails in any way."""
+
+    def __init__(self, message: str):
+        msg = f"""Request call failed with message {message}."""
+        super().__init__(msg)
+        self.message = message
